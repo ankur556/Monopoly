@@ -1,12 +1,24 @@
-import type { Property } from "../types/game";
+import type { BoardSquare } from "../types/game";
 
 export function rollDice(): number {
-  return Math.floor(Math.random() * 11) + 2;
+  return Math.floor(Math.random() * 6) + 1 + Math.floor(Math.random() * 6) + 1;
 }
 
-export function getPropertyAtIndex(
-  properties: Property[],
+export function rollDie(): number {
+  return Math.floor(Math.random() * 6) + 1;
+}
+
+export function getSquareAtIndex(
+  squares: BoardSquare[],
   boardIndex: number,
-): Property | undefined {
-  return properties.find((p) => p.boardIndex === boardIndex);
+): BoardSquare | undefined {
+  return squares.find((s) => s.boardIndex === boardIndex);
+}
+
+/** @deprecated */
+export function getPropertyAtIndex(
+  squares: BoardSquare[],
+  boardIndex: number,
+): BoardSquare | undefined {
+  return getSquareAtIndex(squares, boardIndex);
 }

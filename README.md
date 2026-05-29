@@ -1,6 +1,6 @@
 # Monopoly MVP
 
-A web-based Monopoly clone built with React, Vite, Tailwind CSS, and Zustand.
+A high-fidelity web Monopoly clone built with React, Vite, TypeScript, Tailwind CSS 4, and Zustand.
 
 ## Getting Started
 
@@ -9,21 +9,31 @@ npm install
 npm run dev
 ```
 
-Open [http://localhost:5173](http://localhost:5173) in your browser.
+Open [http://localhost:5173](http://localhost:5173).
+
+## Features
+
+- **40-square board** — Classic color bands, property names, GO, Jail, Taxes, Chance, Community Chest, Free Parking, Go To Jail
+- **Full property economics** — Base rent, 1–4 houses, hotel rents, railroad/utility scaling
+- **Gameplay** — Dice movement, $200 for passing GO, buy/rent, color-set monopoly (2× base rent), house building with on-board icons
+- **Economic ledger** — Transaction history in the control panel
+- **Peer-to-peer trading** — Compose, send, accept, counter, and decline offers
+- **Premium UI** — Isometric 3D board, glass panels, light/dark theme, readable dice with theme-aware contrast
 
 ## Scripts
 
-- `npm run dev` — start the Vite dev server
-- `npm run build` — typecheck and production build
-- `npm run preview` — preview the production build
-- `npm run lint` — run ESLint
+- `npm run dev` — development server
+- `npm run build` — typecheck + production build
+- `npm run preview` — preview production build
 
-## Project structure
+## Architecture
 
-- `src/store/gameStore.ts` — Zustand game state (players, properties, dice, buy/rent)
-- `src/components/Board/` — 40-square perimeter board UI
-- `src/components/GamePanel/` — dice roll, buy/pass, player status
-- `src/data/` — board layout and property seed data
-- `src/types/` — shared TypeScript types
+| Path | Role |
+|------|------|
+| `src/data/boardDefinitions.ts` | All 40 squares + official rent tables |
+| `src/store/gameStore.ts` | Zustand state, turn loop, trade machine |
+| `src/lib/rent.ts` | Rent calculation, monopoly detection |
+| `src/lib/building.ts` | Even-build house rules |
+| `src/lib/executeTrade.ts` | Atomic trade settlement |
 
-Designed for easy integration with a WebSocket backend later: UI reads only from the store actions and selectors.
+Ready for future WebSocket multiplayer, RL, and blockchain layers.

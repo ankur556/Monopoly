@@ -1,48 +1,47 @@
 import type { ReactNode } from "react";
 import { getPositionAt } from "../../data/boardLayout";
 import { useGameStore } from "../../store/gameStore";
+import { BoardCenter } from "./BoardCenter";
 import { BoardSquare } from "./BoardSquare";
 
 const GRID_SIZE = 11;
+const CORNERS = new Set([0, 10, 20, 30]);
 
 export function Board() {
+  const squares = useGameStore((s) => s.squares);
   const players = useGameStore((s) => s.players);
-  const properties = useGameStore((s) => s.properties);
+  const highlightedSquareId = useGameStore((s) => s.highlightedSquareId);
+
+  const squareByIndex = new Map(squares.map((s) => [s.boardIndex, s]));
 
   const cells: ReactNode[] = [];
 
   for (let row = 0; row < GRID_SIZE; row++) {
     for (let col = 0; col < GRID_SIZE; col++) {
       const position = getPositionAt(row, col);
-      const isCenter =
-        row >= 1 && row <= 9 && col >= 1 && col <= 9;
+      const isCenter = row >= 1 && row <= 9 && col >= 1 && col <= 9;
 
       if (isCenter) {
         if (row === 1 && col === 1) {
-          cells.push(
-            <div
-              key="center"
-              className="col-start-2 col-end-11 row-start-2 row-end-11 flex items-center justify-center bg-emerald-800 text-center text-lg font-bold tracking-widest text-white sm:text-2xl"
-              style={{ gridColumn: "2 / 11", gridRow: "2 / 11" }}
-            >
-              MONOPOLY
-            </div>,
-          );
+          cells.push(<BoardCenter key="center" />);
         }
         continue;
       }
 
       if (position !== null) {
-        const property = properties.find((p) => p.boardIndex === position);
+        const square = squareByIndex.get(position);
+        if (!square) continue;
         cells.push(
           <div
             key={`${row}-${col}`}
+            className="min-h-0 min-w-0"
             style={{ gridRow: row + 1, gridColumn: col + 1 }}
           >
             <BoardSquare
-              position={position}
-              property={property}
+              square={square}
               players={players}
+              isCorner={CORNERS.has(position)}
+              isHighlighted={highlightedSquareId === square.id}
             />
           </div>,
         );
@@ -51,9 +50,9 @@ export function Board() {
   }
 
   return (
-    <div className="w-full max-w-[min(100vw-2rem,42rem)]">
+    <div className="aspect-square w-full">
       <div
-        className="grid aspect-square w-full gap-px bg-zinc-500"
+        className="grid h-full w-full gap-px bg-zinc-900/80"
         style={{
           gridTemplateColumns: `repeat(${GRID_SIZE}, minmax(0, 1fr))`,
           gridTemplateRows: `repeat(${GRID_SIZE}, minmax(0, 1fr))`,
