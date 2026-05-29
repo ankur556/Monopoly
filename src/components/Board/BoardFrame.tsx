@@ -8,8 +8,8 @@ interface BoardFrameProps {
 /** Flat 2D top-down board wrapper with glass surround. */
 export function BoardFrame({ children }: BoardFrameProps) {
   return (
-    <div className="flex w-full justify-center px-2 py-4 sm:px-4 sm:py-6">
-      <GlassPanel className="w-full max-w-[min(100vw-1.5rem,44rem)] p-2 sm:p-3">
+    <div className="flex w-full justify-center px-1 py-3 sm:px-2 sm:py-4">
+      <GlassPanel className="w-full max-w-[min(100vw-1rem,58rem)] p-1.5 sm:p-2">
         {children}
       </GlassPanel>
     </div>

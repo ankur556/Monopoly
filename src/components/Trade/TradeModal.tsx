@@ -23,12 +23,9 @@ export function TradeModal() {
   const isComposing = trade.status === "composing" && draft;
   const isPending = trade.status === "pending" && offer;
 
-  const composingAsSender =
-    isComposing && draft.senderId === currentPlayer.id;
-  const pendingAsReceiver =
-    isPending && offer.receiverId === currentPlayer.id;
-  const pendingAsSender =
-    isPending && offer.senderId === currentPlayer.id;
+  const composingAsSender = isComposing && draft.senderId === currentPlayer.id;
+  const pendingAsReceiver = isPending && offer.receiverId === currentPlayer.id;
+  const pendingAsSender = isPending && offer.senderId === currentPlayer.id;
 
   const sender = isComposing
     ? players.find((p) => p.id === draft!.senderId)!
@@ -48,93 +45,169 @@ export function TradeModal() {
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-md">
-      <GlassPanel className="max-h-[90vh] w-full max-w-lg overflow-y-auto p-6">
-        <h2 className="text-xl font-bold">Trade Negotiation</h2>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-md">
+      <GlassPanel className="max-h-[92vh] w-full max-w-xl overflow-y-auto p-6">
 
+        {/* Header */}
+        <div className="mb-5 flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-600 text-xl shadow-lg">
+            🤝
+          </div>
+          <div>
+            <h2 className="text-xl font-black tracking-tight">Trade Negotiation</h2>
+            <p className="text-xs opacity-60">
+              {isComposing
+                ? `${sender.name} → ${receiver.name}`
+                : `${sender.name} made an offer to ${receiver.name}`}
+            </p>
+          </div>
+        </div>
+
+        {/* COMPOSING VIEW */}
         {isComposing && composingAsSender && (
           <>
-            <p className="mt-1 text-sm opacity-70">
-              Propose a deal with {receiver.name}
-            </p>
-            <div className="mt-4 grid gap-4 sm:grid-cols-2">
-              <div className="space-y-3">
-                <p className="text-xs font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
-                  You offer
+            {/* Deal Board */}
+            <div className="grid gap-4 sm:grid-cols-2">
+
+              {/* YOU OFFER column */}
+              <div className="rounded-2xl border border-blue-400/30 bg-blue-500/10 p-4">
+                <p className="mb-3 flex items-center gap-2 text-xs font-black uppercase tracking-widest text-blue-400">
+                  <span className="text-base">🎩</span> You Offer
                 </p>
-                <label className="block text-sm">
-                  Cash
+
+                {/* Cash slider */}
+                <div className="mb-4">
+                  <label className="mb-1 block text-xs font-semibold text-blue-300">
+                    Cash — ${draft.moneyOfferedBySender.toLocaleString()}
+                  </label>
                   <input
+                    id="sender-cash-slider"
+                    type="range"
+                    min={0}
+                    max={sender.balance}
+                    step={10}
+                    value={draft.moneyOfferedBySender}
+                    onChange={(e) =>
+                      updateTradeDraft({ moneyOfferedBySender: Number(e.target.value) })
+                    }
+                    className="w-full accent-blue-400"
+                  />
+                  <input
+                    id="sender-cash-input"
                     type="number"
                     min={0}
                     max={sender.balance}
                     value={draft.moneyOfferedBySender}
                     onChange={(e) =>
                       updateTradeDraft({
-                        moneyOfferedBySender: Math.max(
-                          0,
-                          Number(e.target.value) || 0,
+                        moneyOfferedBySender: Math.min(
+                          sender.balance,
+                          Math.max(0, Number(e.target.value) || 0),
                         ),
                       })
                     }
-                    className="mt-1 w-full rounded-lg border bg-white/50 px-3 py-2 dark:bg-zinc-900/50"
-                    style={{ borderColor: "var(--glass-border)" }}
+                    className="mt-1 w-full rounded-lg border border-blue-400/30 bg-blue-900/30 px-3 py-1.5 text-sm text-white placeholder:opacity-50 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                    placeholder="$0"
                   />
-                </label>
+                  <p className="mt-1 text-[10px] opacity-50">
+                    Your balance: ${sender.balance.toLocaleString()}
+                  </p>
+                </div>
+
+                {/* Properties */}
                 <TradePropertyList
                   title="Your properties"
                   properties={senderProps}
                   selectedIds={draft.propertiesOfferedBySender}
-                  onChange={(ids) =>
-                    updateTradeDraft({ propertiesOfferedBySender: ids })
-                  }
+                  onChange={(ids) => updateTradeDraft({ propertiesOfferedBySender: ids })}
                 />
               </div>
-              <div className="space-y-3">
-                <p className="text-xs font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400">
-                  You want
+
+              {/* YOU WANT column */}
+              <div className="rounded-2xl border border-amber-400/30 bg-amber-500/10 p-4">
+                <p className="mb-3 flex items-center gap-2 text-xs font-black uppercase tracking-widest text-amber-400">
+                  <span className="text-base">🚗</span> You Want
                 </p>
-                <label className="block text-sm">
-                  Cash from opponent
+
+                {/* Cash slider */}
+                <div className="mb-4">
+                  <label className="mb-1 block text-xs font-semibold text-amber-300">
+                    Cash from {receiver.name} — ${draft.moneyOfferedByReceiver.toLocaleString()}
+                  </label>
                   <input
+                    id="receiver-cash-slider"
+                    type="range"
+                    min={0}
+                    max={receiver.balance}
+                    step={10}
+                    value={draft.moneyOfferedByReceiver}
+                    onChange={(e) =>
+                      updateTradeDraft({ moneyOfferedByReceiver: Number(e.target.value) })
+                    }
+                    className="w-full accent-amber-400"
+                  />
+                  <input
+                    id="receiver-cash-input"
                     type="number"
                     min={0}
                     max={receiver.balance}
                     value={draft.moneyOfferedByReceiver}
                     onChange={(e) =>
                       updateTradeDraft({
-                        moneyOfferedByReceiver: Math.max(
-                          0,
-                          Number(e.target.value) || 0,
+                        moneyOfferedByReceiver: Math.min(
+                          receiver.balance,
+                          Math.max(0, Number(e.target.value) || 0),
                         ),
                       })
                     }
-                    className="mt-1 w-full rounded-lg border bg-white/50 px-3 py-2 dark:bg-zinc-900/50"
-                    style={{ borderColor: "var(--glass-border)" }}
+                    className="mt-1 w-full rounded-lg border border-amber-400/30 bg-amber-900/30 px-3 py-1.5 text-sm text-white placeholder:opacity-50 focus:outline-none focus:ring-1 focus:ring-amber-400"
+                    placeholder="$0"
                   />
-                </label>
+                  <p className="mt-1 text-[10px] opacity-50">
+                    Their balance: ${receiver.balance.toLocaleString()}
+                  </p>
+                </div>
+
+                {/* Properties */}
                 <TradePropertyList
                   title={`${receiver.name}'s properties`}
                   properties={receiverProps}
                   selectedIds={draft.propertiesOfferedByReceiver}
-                  onChange={(ids) =>
-                    updateTradeDraft({ propertiesOfferedByReceiver: ids })
-                  }
+                  onChange={(ids) => updateTradeDraft({ propertiesOfferedByReceiver: ids })}
                 />
               </div>
             </div>
-            <div className="mt-6 flex gap-2">
+
+            {/* Deal summary strip */}
+            <div className="mt-4 rounded-xl bg-white/8 px-4 py-3 text-sm">
+              <p className="font-semibold text-emerald-300">Deal Summary</p>
+              <p className="mt-1 text-xs opacity-70">
+                You give: <strong className="text-white">${draft.moneyOfferedBySender}</strong>
+                {draft.propertiesOfferedBySender.length > 0 && (
+                  <> + <strong className="text-white">{draft.propertiesOfferedBySender.length} propert{draft.propertiesOfferedBySender.length > 1 ? "ies" : "y"}</strong></>
+                )}
+                {" · "}
+                You get: <strong className="text-white">${draft.moneyOfferedByReceiver}</strong>
+                {draft.propertiesOfferedByReceiver.length > 0 && (
+                  <> + <strong className="text-white">{draft.propertiesOfferedByReceiver.length} propert{draft.propertiesOfferedByReceiver.length > 1 ? "ies" : "y"}</strong></>
+                )}
+              </p>
+            </div>
+
+            <div className="mt-4 flex gap-2">
               <button
+                id="send-trade-offer-btn"
                 type="button"
                 onClick={sendTradeOffer}
-                className="flex-1 rounded-xl bg-emerald-700 px-4 py-2.5 font-semibold text-white hover:bg-emerald-600"
+                className="flex-1 rounded-xl bg-gradient-to-br from-emerald-600 to-emerald-800 px-4 py-2.5 font-bold text-white shadow-lg transition hover:from-emerald-500 hover:to-emerald-700"
               >
-                Send Offer
+                📨 Send Offer
               </button>
               <button
+                id="cancel-trade-btn"
                 type="button"
                 onClick={cancelTrade}
-                className="rounded-xl border px-4 py-2.5 font-semibold hover:opacity-80"
+                className="rounded-xl border px-4 py-2.5 font-semibold opacity-70 hover:opacity-100"
                 style={{ borderColor: "var(--glass-border)" }}
               >
                 Cancel
@@ -149,41 +222,43 @@ export function TradeModal() {
           </p>
         )}
 
+        {/* PENDING OFFER VIEW */}
         {isPending && (
           <>
-            <p className="mt-1 text-sm opacity-70">
-              {sender.name} proposes a trade with {receiver.name}
-            </p>
             <TradeSummary offer={offer} squares={squares} players={players} />
+
             {pendingAsReceiver && (
-              <div className="mt-6 flex flex-wrap gap-2">
+              <div className="mt-5 flex flex-wrap gap-2">
                 <button
+                  id="accept-trade-btn"
                   type="button"
                   onClick={acceptTrade}
-                  className="flex-1 rounded-xl bg-emerald-700 px-4 py-2.5 font-semibold text-white hover:bg-emerald-600"
+                  className="flex-1 rounded-xl bg-gradient-to-br from-emerald-600 to-emerald-800 px-4 py-2.5 font-bold text-white shadow-lg transition hover:opacity-90"
                 >
-                  Accept
+                  ✅ Accept
                 </button>
                 <button
+                  id="counter-trade-btn"
                   type="button"
                   onClick={counterTrade}
-                  className="flex-1 rounded-xl bg-amber-600 px-4 py-2.5 font-semibold text-white hover:bg-amber-500"
+                  className="flex-1 rounded-xl bg-gradient-to-br from-amber-500 to-amber-700 px-4 py-2.5 font-bold text-white shadow-lg transition hover:opacity-90"
                 >
-                  Counter
+                  🔄 Counter
                 </button>
                 <button
+                  id="decline-trade-btn"
                   type="button"
                   onClick={declineTrade}
-                  className="flex-1 rounded-xl border px-4 py-2.5 font-semibold hover:opacity-80"
+                  className="flex-1 rounded-xl border px-4 py-2.5 font-bold opacity-70 hover:opacity-100"
                   style={{ borderColor: "var(--glass-border)" }}
                 >
-                  Decline
+                  ❌ Decline
                 </button>
               </div>
             )}
             {pendingAsSender && (
-              <p className="mt-4 text-sm font-medium text-amber-700 dark:text-amber-300">
-                Waiting for {receiver.name} to respond…
+              <p className="mt-4 rounded-xl bg-amber-500/10 px-4 py-2.5 text-sm font-medium text-amber-300">
+                ⏳ Waiting for {receiver.name} to respond…
               </p>
             )}
           </>
@@ -204,35 +279,52 @@ function TradeSummary({
 }) {
   const sender = players.find((p) => p.id === offer.senderId)!;
   const receiver = players.find((p) => p.id === offer.receiverId)!;
-
-  const propName = (id: string) =>
-    squares.find((p) => p.id === id)?.name ?? id;
+  const propName = (id: string) => squares.find((p) => p.id === id)?.name ?? id;
 
   return (
-    <div className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
-      <div className="rounded-xl bg-white/20 p-3 dark:bg-black/20">
-        <p className="font-semibold">{sender.name} gives</p>
-        <p>${offer.moneyOfferedBySender}</p>
-        <ul className="mt-1 list-inside list-disc opacity-80">
-          {offer.propertiesOfferedBySender.map((id) => (
-            <li key={id}>{propName(id)}</li>
-          ))}
-          {offer.propertiesOfferedBySender.length === 0 && (
-            <li className="list-none opacity-50">No properties</li>
-          )}
-        </ul>
+    <div className="mt-4 grid gap-3 sm:grid-cols-2">
+      {/* Sender gives */}
+      <div className="rounded-2xl border border-blue-400/30 bg-blue-500/10 p-4">
+        <p className="mb-2 text-xs font-black uppercase tracking-widest text-blue-300">
+          🎩 {sender.name} gives
+        </p>
+        <p className="text-2xl font-black text-white">
+          ${offer.moneyOfferedBySender.toLocaleString()}
+        </p>
+        {offer.propertiesOfferedBySender.length > 0 && (
+          <ul className="mt-2 space-y-0.5">
+            {offer.propertiesOfferedBySender.map((id) => (
+              <li key={id} className="text-xs text-blue-200">
+                • {propName(id)}
+              </li>
+            ))}
+          </ul>
+        )}
+        {offer.moneyOfferedBySender === 0 && offer.propertiesOfferedBySender.length === 0 && (
+          <p className="mt-1 text-xs opacity-40">Nothing offered</p>
+        )}
       </div>
-      <div className="rounded-xl bg-white/20 p-3 dark:bg-black/20">
-        <p className="font-semibold">{receiver.name} gives</p>
-        <p>${offer.moneyOfferedByReceiver}</p>
-        <ul className="mt-1 list-inside list-disc opacity-80">
-          {offer.propertiesOfferedByReceiver.map((id) => (
-            <li key={id}>{propName(id)}</li>
-          ))}
-          {offer.propertiesOfferedByReceiver.length === 0 && (
-            <li className="list-none opacity-50">No properties</li>
-          )}
-        </ul>
+
+      {/* Receiver gives */}
+      <div className="rounded-2xl border border-amber-400/30 bg-amber-500/10 p-4">
+        <p className="mb-2 text-xs font-black uppercase tracking-widest text-amber-300">
+          🚗 {receiver.name} gives
+        </p>
+        <p className="text-2xl font-black text-white">
+          ${offer.moneyOfferedByReceiver.toLocaleString()}
+        </p>
+        {offer.propertiesOfferedByReceiver.length > 0 && (
+          <ul className="mt-2 space-y-0.5">
+            {offer.propertiesOfferedByReceiver.map((id) => (
+              <li key={id} className="text-xs text-amber-200">
+                • {propName(id)}
+              </li>
+            ))}
+          </ul>
+        )}
+        {offer.moneyOfferedByReceiver === 0 && offer.propertiesOfferedByReceiver.length === 0 && (
+          <p className="mt-1 text-xs opacity-40">Nothing offered</p>
+        )}
       </div>
     </div>
   );

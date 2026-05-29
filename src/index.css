@@ -68,6 +68,32 @@
   }
 }
 
+/* Elastic rebound when a token lands on a new square */
+@keyframes token-land {
+  0% {
+    transform: scale(1) translateY(0);
+    opacity: 0.7;
+  }
+  20% {
+    transform: scale(1.7) translateY(-4px);
+    opacity: 1;
+  }
+  45% {
+    transform: scale(0.85) translateY(1px);
+  }
+  65% {
+    transform: scale(1.2) translateY(-2px);
+  }
+  80% {
+    transform: scale(0.95) translateY(0);
+  }
+  100% {
+    transform: scale(1) translateY(0);
+    opacity: 1;
+  }
+}
+
+/* Gentle continuous bob while resting */
 @keyframes token-bob {
   0%,
   100% {
@@ -78,25 +104,35 @@
   }
 }
 
+/* Dramatically punchier announce pop — scale in fast, hold, fade out */
 @keyframes announce-pop {
   0% {
     opacity: 0;
-    transform: scale(0.5);
+    transform: scale(0.2) translateY(12px);
+    filter: blur(4px);
   }
-  15% {
+  12% {
     opacity: 1;
-    transform: scale(1.08);
+    transform: scale(1.18) translateY(-2px);
+    filter: blur(0);
   }
-  30% {
+  22% {
+    transform: scale(0.96) translateY(0);
+  }
+  28% {
+    transform: scale(1.04);
+  }
+  35% {
     transform: scale(1);
   }
-  85% {
+  80% {
     opacity: 1;
     transform: scale(1);
   }
   100% {
     opacity: 0;
-    transform: scale(0.95);
+    transform: scale(0.9) translateY(-6px);
+    filter: blur(2px);
   }
 }
 
@@ -136,13 +172,75 @@
   }
 }
 
+/* Deed card slide-in from below */
+@keyframes deed-reveal {
+  0% {
+    opacity: 0;
+    transform: translateY(40px) scale(0.92);
+  }
+  70% {
+    opacity: 1;
+    transform: translateY(-3px) scale(1.01);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Portfolio group fade-in */
+@keyframes portfolio-slide {
+  from {
+    opacity: 0;
+    transform: translateX(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* Turn badge pulse */
+@keyframes turn-badge-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.5); }
+  50% { box-shadow: 0 0 0 6px rgba(52, 211, 153, 0); }
+}
+
+/* Pulsing outer halo ring around the current player's token */
+@keyframes token-halo-p1 {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(96,165,250,0.9), 0 0 16px 6px rgba(59,130,246,0.6); }
+  50%       { box-shadow: 0 0 0 6px rgba(96,165,250,0.4), 0 0 28px 12px rgba(59,130,246,0.3); }
+}
+@keyframes token-halo-p2 {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(252,165,165,0.9), 0 0 16px 6px rgba(244,63,94,0.6); }
+  50%       { box-shadow: 0 0 0 6px rgba(252,165,165,0.4), 0 0 28px 12px rgba(244,63,94,0.3); }
+}
+
+/* Tile glow when a player stands on it */
+@keyframes player-tile-glow-p1 {
+  0%, 100% { box-shadow: inset 0 0 0 3px rgba(59,130,246,0.9), inset 0 0 12px rgba(59,130,246,0.4); }
+  50%       { box-shadow: inset 0 0 0 3px rgba(59,130,246,0.6), inset 0 0 20px rgba(59,130,246,0.25); }
+}
+@keyframes player-tile-glow-p2 {
+  0%, 100% { box-shadow: inset 0 0 0 3px rgba(244,63,94,0.9), inset 0 0 12px rgba(244,63,94,0.4); }
+  50%       { box-shadow: inset 0 0 0 3px rgba(244,63,94,0.6), inset 0 0 20px rgba(244,63,94,0.25); }
+}
+
 @theme inline {
   --animate-dice-tumble: dice-tumble 0.65s cubic-bezier(0.34, 1.2, 0.64, 1) forwards;
   --animate-token-bob: token-bob 2.5s ease-in-out infinite;
-  --animate-announce-pop: announce-pop 2s ease-out forwards;
+  --animate-token-land: token-land 0.42s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+  --animate-announce-pop: announce-pop 2.4s cubic-bezier(0.22, 1, 0.36, 1) forwards;
   --animate-card-slide-up: card-slide-up 0.85s cubic-bezier(0.22, 1, 0.36, 1) forwards;
   --animate-square-pulse: square-pulse 1s ease-in-out infinite;
   --animate-ticker-in: ticker-in 0.35s ease-out forwards;
+  --animate-deed-reveal: deed-reveal 0.5s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  --animate-portfolio-slide: portfolio-slide 0.3s ease-out forwards;
+  --animate-turn-badge-pulse: turn-badge-pulse 2s ease-in-out infinite;
+  --animate-token-halo-p1: token-halo-p1 1.4s ease-in-out infinite;
+  --animate-token-halo-p2: token-halo-p2 1.4s ease-in-out infinite;
+  --animate-player-tile-glow-p1: player-tile-glow-p1 1.4s ease-in-out infinite;
+  --animate-player-tile-glow-p2: player-tile-glow-p2 1.4s ease-in-out infinite;
 }
 
 body {
@@ -167,4 +265,35 @@ body {
 
 .backface-hidden {
   backface-visibility: hidden;
+}
+
+/* Title Deed Card — physical board-game styling */
+.deed-card {
+  background: #fffef5;
+  border: 2px solid #2a2a2a;
+  border-radius: 6px;
+  font-family: "Georgia", serif;
+  color: #1a1a1a;
+  box-shadow:
+    0 20px 60px rgba(0, 0, 0, 0.45),
+    0 4px 16px rgba(0, 0, 0, 0.25),
+    inset 0 0 0 4px rgba(0,0,0,0.06);
+}
+
+.deed-card-header {
+  border-bottom: 2px solid #2a2a2a;
+  padding: 10px 12px 8px;
+}
+
+.deed-card-rent-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 3px 0;
+  border-bottom: 1px solid rgba(0,0,0,0.1);
+  font-size: 11px;
+}
+
+.deed-card-rent-row:last-child {
+  border-bottom: none;
 }

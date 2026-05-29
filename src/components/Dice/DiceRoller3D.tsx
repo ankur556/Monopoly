@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from "react";
+import { useCallback } from "react";
 import { useGameStore } from "../../store/gameStore";
 
 function DieCube({
@@ -62,13 +62,17 @@ export function DiceRoller3D() {
   const tradeStatus = useGameStore((s) => s.trade.status);
   const cardReveal = useGameStore((s) => s.cardReveal);
   const isRolling = useGameStore((s) => s.isRolling);
+  const isMoving = useGameStore((s) => s.isMoving);
   const rollDice = useGameStore((s) => s.rollDice);
-  const finishRoll = useGameStore((s) => s.finishRoll);
+
+  const auctionStatus = useGameStore((s) => s.auction.status);
 
   const disabled =
     pendingAction !== null ||
     tradeStatus !== "idle" ||
+    auctionStatus !== "idle" ||
     isRolling ||
+    isMoving ||
     cardReveal !== null;
 
   const die1 = lastDie1 ?? 1;
@@ -78,12 +82,6 @@ export function DiceRoller3D() {
     if (disabled) return;
     rollDice();
   }, [disabled, rollDice]);
-
-  useEffect(() => {
-    if (!isRolling) return;
-    const timer = setTimeout(() => finishRoll(), 650);
-    return () => clearTimeout(timer);
-  }, [isRolling, finishRoll]);
 
   return (
     <div className="flex flex-col items-center gap-3">

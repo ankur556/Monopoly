@@ -4,6 +4,7 @@ import { DiceControls } from "./DiceControls";
 import { LedgerPanel } from "./LedgerPanel";
 import { PlayerCard } from "./PlayerCard";
 import { PropertyActions } from "./PropertyActions";
+import { PropertyPortfolio } from "./PropertyPortfolio";
 
 export function GamePanel() {
   const players = useGameStore((s) => s.players);
@@ -13,6 +14,8 @@ export function GamePanel() {
   const trade = useGameStore((s) => s.trade);
   const turnNumber = useGameStore((s) => s.turnNumber);
   const openTrade = useGameStore((s) => s.openTrade);
+  const isMoving = useGameStore((s) => s.isMoving);
+  const isRolling = useGameStore((s) => s.isRolling);
 
   const tradeBlocked =
     pendingAction !== null || trade.status !== "idle";
@@ -47,7 +50,21 @@ export function GamePanel() {
       <DiceControls />
       <PropertyActions />
 
+      {/* Movement progress indicator */}
+      {(isMoving || isRolling) && (
+        <div className="flex items-center gap-2 rounded-lg bg-emerald-500/15 px-3 py-2">
+          <span className="animate-bounce text-base">🎲</span>
+          <span className="text-xs font-semibold text-emerald-700 dark:text-emerald-300">
+            Token moving…
+          </span>
+        </div>
+      )}
+
+      {/* Property Portfolio — universal house building */}
+      <PropertyPortfolio />
+
       <button
+        id="propose-trade-btn"
         type="button"
         onClick={openTrade}
         disabled={tradeBlocked}
