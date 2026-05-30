@@ -29,7 +29,11 @@ import type {
 } from "../types/game";
 import { INITIAL_AUCTION_STATE, INITIAL_TRADE_STATE } from "../types/game";
 
+/** Which top-level screen the app is on */
+export type AppScreen = "MENU" | "PLAYING";
+
 interface GameState {
+  appScreen: AppScreen;
   players: Player[];
   squares: BoardSquare[];
   currentPlayerIndex: number;
@@ -82,6 +86,9 @@ interface GameState {
   payJailFine: () => void;
   useGetOutOfJailCard: () => void;
   rollForJailBreak: () => void;
+  // App navigation
+  initLocalGame: (playerNames: string[]) => void;
+  returnToMenu: () => void;
 }
 
 const INITIAL_PLAYERS: Player[] = [
@@ -97,8 +104,8 @@ const INITIAL_PLAYERS: Player[] = [
 
 const HUGE_RENT_THRESHOLD = 100;
 
-function nextPlayerIndex(current: number): number {
-  return (current + 1) % 2;
+function nextPlayerIndex(current: number, total: number): number {
+  return (current + 1) % total;
 }
 
 function getOpponentId(players: Player[], currentId: PlayerId): PlayerId {
@@ -208,6 +215,7 @@ type InternalStore = GameState & { _resolveLanding: (rolledDoubles: boolean) => 
 
 export const useGameStore = create<GameState>((set, get) => {
   const store: InternalStore = {
+    appScreen: "MENU",
     players: INITIAL_PLAYERS.map((p) => ({ ...p })),
     squares: createInitialSquares(),
     currentPlayerIndex: 0,
@@ -411,13 +419,15 @@ export const useGameStore = create<GameState>((set, get) => {
 
     endTurn: () => {
       const state = get() as InternalStore;
-      const nextIndex = nextPlayerIndex(state.currentPlayerIndex);
+      const totalPlayers = state.players.length;
+      const nextIndex = nextPlayerIndex(state.currentPlayerIndex, totalPlayers);
       const nextPlayer = state.players[nextIndex];
 
       set({
         currentPlayerIndex: nextIndex,
+        // Increment the round counter when the last player ends their turn
         turnNumber:
-          state.currentPlayerIndex === 1
+          state.currentPlayerIndex === totalPlayers - 1
             ? state.turnNumber + 1
             : state.turnNumber,
         turnPhase: "PRE_ROLL",
@@ -1251,6 +1261,85 @@ export const useGameStore = create<GameState>((set, get) => {
           currentBidderIndex: nextIdx,
         },
         message: `${passer.name} passes. ${players[nextIdx].name}'s turn.`,
+      });
+    },
+
+    // ─── App Navigation ──────────────────────────────────────────────────────
+
+    initLocalGame: (playerNames: string[]) => {
+      const clamped = playerNames.slice(0, 6);
+      const newPlayers: Player[] = clamped.map((name, i) => ({
+        id: `p${i + 1}`,
+        name: name.trim() || `Player ${i + 1}`,
+        balance: 1500,
+        position: 0,
+        inJail: false,
+        jailTurns: 0,
+        doublesCount: 0,
+        getOutOfJailFreeCards: 0,
+      }));
+
+      const firstPlayer = newPlayers[0];
+      set({
+        appScreen: "PLAYING",
+        players: newPlayers,
+        squares: createInitialSquares(),
+        currentPlayerIndex: 0,
+        turnNumber: 1,
+        turnPhase: "PRE_ROLL",
+        lastRoll: null,
+        lastDie1: null,
+        lastDie2: null,
+        pendingAction: null,
+        message: `${firstPlayer.name}, roll the dice.`,
+        ledger: [],
+        actionLog: [
+          {
+            id: "log-0",
+            text: `Game started with ${newPlayers.length} players`,
+            timestamp: Date.now(),
+          },
+        ],
+        activeAnnouncement: `${firstPlayer.name.toUpperCase()}'S TURN`,
+        announcementVariant: "turn",
+        highlightedSquareId: null,
+        cardReveal: null,
+        trade: { ...INITIAL_TRADE_STATE },
+        auction: { ...INITIAL_AUCTION_STATE },
+        selectedPropertyId: null,
+        propertyCardFlipped: false,
+        isRolling: false,
+        movementQueue: [],
+        isMoving: false,
+      });
+    },
+
+    returnToMenu: () => {
+      set({
+        appScreen: "MENU",
+        players: INITIAL_PLAYERS.map((p) => ({ ...p })),
+        squares: createInitialSquares(),
+        currentPlayerIndex: 0,
+        turnNumber: 1,
+        turnPhase: "PRE_ROLL",
+        lastRoll: null,
+        lastDie1: null,
+        lastDie2: null,
+        pendingAction: null,
+        message: "Roll the dice to begin.",
+        ledger: [],
+        actionLog: [],
+        activeAnnouncement: null,
+        announcementVariant: "default",
+        highlightedSquareId: null,
+        cardReveal: null,
+        trade: { ...INITIAL_TRADE_STATE },
+        auction: { ...INITIAL_AUCTION_STATE },
+        selectedPropertyId: null,
+        propertyCardFlipped: false,
+        isRolling: false,
+        movementQueue: [],
+        isMoving: false,
       });
     },
   };
