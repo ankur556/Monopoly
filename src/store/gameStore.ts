@@ -83,9 +83,9 @@ interface GameState {
   openTrade: () => void;
   updateTradeDraft: (partial: Partial<TradeOffer>) => void;
   sendTradeOffer: () => void;
-  acceptTrade: () => void;
-  declineTrade: () => void;
-  counterTrade: () => void;
+  acceptTrade: (actorId?: PlayerId) => void;
+  declineTrade: (actorId?: PlayerId) => void;
+  counterTrade: (actorId?: PlayerId) => void;
   cancelTrade: () => void;
   // Auction actions
   placeBid: (amount: number) => void;
@@ -1300,12 +1300,14 @@ export const useGameStore = create<GameState>((set, get) => {
       });
     },
 
-    acceptTrade: () => {
+    acceptTrade: (actorId?: PlayerId) => {
       const state = get() as InternalStore;
       if (state.trade.status !== "pending" || !state.trade.offer) return;
 
-      const current = state.players[state.currentPlayerIndex];
-      if (current.id !== state.trade.offer.receiverId) {
+      const actor = actorId ? state.players.find((p) => p.id === actorId) : state.players[state.currentPlayerIndex];
+      if (!actor) return;
+
+      if (actor.id !== state.trade.offer.receiverId) {
         set({ message: "Only the receiver can accept this trade." });
         return;
       }
@@ -1317,11 +1319,9 @@ export const useGameStore = create<GameState>((set, get) => {
         return;
       }
 
-      const sender = state.players.find(
-        (p) => p.id === state.trade.offer!.senderId,
-      )!;
+      const sender = state.players.find((p) => p.id === state.trade.offer!.senderId)!;
 
-      state.logAction(`Trade accepted: ${sender.name} & ${current.name}`);
+      state.logAction(`Trade accepted: ${sender.name} & ${actor.name}`);
       state.showAnnouncement("TRADE COMPLETE!", "default");
 
       set({
@@ -1332,37 +1332,39 @@ export const useGameStore = create<GameState>((set, get) => {
           turn: state.turnNumber,
           type: "trade",
           amount: 0,
-          message: `Trade completed: ${sender.name} & ${current.name}`,
+          message: `Trade completed: ${sender.name} & ${actor.name}`,
         }),
-        message: `Trade accepted between ${sender.name} and ${current.name}.`,
+        message: `Trade accepted between ${sender.name} and ${actor.name}.`,
       });
     },
 
-    declineTrade: () => {
+    declineTrade: (actorId?: PlayerId) => {
       const state = get() as InternalStore;
       if (state.trade.status !== "pending" || !state.trade.offer) return;
 
-      const current = state.players[state.currentPlayerIndex];
-      if (current.id !== state.trade.offer.receiverId) return;
+      const actor = actorId ? state.players.find((p) => p.id === actorId) : state.players[state.currentPlayerIndex];
+      if (!actor) return;
+      if (actor.id !== state.trade.offer.receiverId) return;
 
-      state.logAction(`${current.name} declined the trade`);
+      state.logAction(`${actor.name} declined the trade`);
 
       set({
         trade: { ...INITIAL_TRADE_STATE },
-        message: `${current.name} declined the trade offer.`,
+        message: `${actor.name} declined the trade offer.`,
       });
     },
 
-    counterTrade: () => {
+    counterTrade: (actorId?: PlayerId) => {
       const state = get() as InternalStore;
       if (state.trade.status !== "pending" || !state.trade.offer) return;
 
-      const current = state.players[state.currentPlayerIndex];
-      if (current.id !== state.trade.offer.receiverId) return;
+      const actor = actorId ? state.players.find((p) => p.id === actorId) : state.players[state.currentPlayerIndex];
+      if (!actor) return;
+      if (actor.id !== state.trade.offer.receiverId) return;
 
       const prev = state.trade.offer;
       const counterDraft: TradeOffer = {
-        senderId: current.id,
+        senderId: actor.id,
         receiverId: prev.senderId,
         moneyOfferedBySender: prev.moneyOfferedByReceiver,
         moneyOfferedByReceiver: prev.moneyOfferedBySender,
@@ -1372,7 +1374,7 @@ export const useGameStore = create<GameState>((set, get) => {
         jailCardsOfferedByReceiver: prev.jailCardsOfferedBySender ?? 0,
       };
 
-      state.logAction(`${current.name} is countering the trade`);
+      state.logAction(`${actor.name} is countering the trade`);
 
       set({
         trade: {
@@ -1380,7 +1382,7 @@ export const useGameStore = create<GameState>((set, get) => {
           offer: null,
           draft: counterDraft,
         },
-        message: `${current.name} is preparing a counter-offer.`,
+        message: `${actor.name} is preparing a counter-offer.`,
       });
     },
 

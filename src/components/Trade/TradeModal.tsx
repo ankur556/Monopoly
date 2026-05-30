@@ -1,3 +1,4 @@
+import React from "react";
 import { useGameStore } from "../../store/gameStore";
 import { GlassPanel } from "../ui/GlassPanel";
 import { TradePropertyList } from "./TradePropertyList";
@@ -14,6 +15,15 @@ export function TradeModal() {
   const counterTrade = useGameStore((s) => s.counterTrade);
   const cancelTrade = useGameStore((s) => s.cancelTrade);
 
+  const [actingAsReceiver, setActingAsReceiver] = React.useState(false);
+  React.useEffect(() => {
+    if (trade.status === "pending" && trade.offer) {
+      setActingAsReceiver(true);
+    } else {
+      setActingAsReceiver(false);
+    }
+  }, [trade.status, trade.offer]);
+
   if (trade.status === "idle") return null;
 
   const currentPlayer = players[currentPlayerIndex];
@@ -24,8 +34,8 @@ export function TradeModal() {
   const isPending = trade.status === "pending" && offer;
 
   const composingAsSender = isComposing && draft.senderId === currentPlayer.id;
-  const pendingAsReceiver = isPending && offer.receiverId === currentPlayer.id;
-  const pendingAsSender = isPending && offer.senderId === currentPlayer.id;
+  const showResponseControls = isPending && offer && (offer.receiverId === currentPlayer.id || actingAsReceiver);
+  const pendingAsSender = isPending && offer && offer.senderId === currentPlayer.id;
 
   const sender = isComposing
     ? players.find((p) => p.id === draft!.senderId)!
@@ -283,12 +293,12 @@ export function TradeModal() {
           <>
             <TradeSummary offer={offer} squares={squares} players={players} />
 
-            {pendingAsReceiver && (
+            {showResponseControls ? (
               <div className="mt-5 flex flex-wrap gap-2">
                 <button
                   id="accept-trade-btn"
                   type="button"
-                  onClick={acceptTrade}
+                  onClick={() => acceptTrade(receiver.id)}
                   className="flex-1 rounded-xl bg-gradient-to-br from-emerald-600 to-emerald-800 px-4 py-2.5 font-bold text-white shadow-lg transition hover:opacity-90"
                 >
                   ✅ Accept
@@ -296,7 +306,7 @@ export function TradeModal() {
                 <button
                   id="counter-trade-btn"
                   type="button"
-                  onClick={counterTrade}
+                  onClick={() => counterTrade(receiver.id)}
                   className="flex-1 rounded-xl bg-gradient-to-br from-amber-500 to-amber-700 px-4 py-2.5 font-bold text-white shadow-lg transition hover:opacity-90"
                 >
                   🔄 Counter
@@ -304,13 +314,35 @@ export function TradeModal() {
                 <button
                   id="decline-trade-btn"
                   type="button"
-                  onClick={declineTrade}
+                  onClick={() => declineTrade(receiver.id)}
                   className="flex-1 rounded-xl border px-4 py-2.5 font-bold opacity-70 hover:opacity-100"
                   style={{ borderColor: "var(--glass-border)" }}
                 >
                   ❌ Decline
                 </button>
+                {actingAsReceiver && (
+                  <button
+                    type="button"
+                    onClick={() => setActingAsReceiver(false)}
+                    className="mt-2 w-full rounded-md border px-3 py-1 text-sm opacity-70"
+                  >
+                    Cancel response mode
+                  </button>
+                )}
               </div>
+            ) : (
+              // If not the sender and not yet acting as receiver, offer a toggle to respond as the receiver
+              !pendingAsSender && isPending && offer && offer.receiverId !== currentPlayer.id && (
+                <div className="mt-4">
+                  <button
+                    type="button"
+                    onClick={() => setActingAsReceiver(true)}
+                    className="rounded-md bg-emerald-600 px-3 py-1 text-sm font-semibold text-white"
+                  >
+                    Respond as {receiver.name}
+                  </button>
+                </div>
+              )
             )}
             {pendingAsSender && (
               <p className="mt-4 rounded-xl bg-amber-500/10 px-4 py-2.5 text-sm font-medium text-amber-300">
