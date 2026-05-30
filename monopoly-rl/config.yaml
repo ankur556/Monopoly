@@ -1,0 +1,53 @@
+# Monopoly RL Configuration
+
+game:
+  n_players: 4
+  max_turns: 500  # safety cap per game
+  starting_balance: 1500
+
+llm:
+  provider: groq
+  model: llama-3.1-70b-versatile  # fast + strong reasoning
+  temperature: 0.3
+  max_tokens: 256
+  max_retries: 3
+  cache_enabled: true  # cache identical states to save API calls
+
+collection:
+  n_games: 1000           # Stage 1: LLM games to collect
+  save_dir: data_collected
+  n_workers: 4            # parallel game threads (LLM is bottleneck so keep low)
+  checkpoint_every: 50
+
+behavioral_cloning:  # Stage 1 training
+  epochs: 50
+  batch_size: 256
+  lr: 3.0e-4
+  val_split: 0.1
+  save_dir: models/bc
+  device: auto  # cuda if available, else cpu
+  early_stop_patience: 5
+
+ppo:  # Stage 2 training
+  total_timesteps: 5000000
+  n_steps: 2048
+  batch_size: 64
+  n_epochs: 10
+  learning_rate: 3.0e-4
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_range: 0.2
+  ent_coef: 0.01
+  n_envs: 8              # parallel environments
+  llm_opponent_prob: 0.3  # fraction of games with LLM opponent
+  save_dir: models/ppo
+  checkpoint_every: 100000
+  eval_every: 50000
+  eval_episodes: 20
+
+server:
+  host: 0.0.0.0
+  port: 8765
+  model_path: models/ppo/best_model.zip  # falls back to bc if ppo not found
+  bc_model_path: models/bc/best_model.pt
+  device: cpu
