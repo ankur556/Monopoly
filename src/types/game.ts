@@ -51,6 +51,8 @@ export interface Player {
   doublesCount: number;
   /** Number of Get Out of Jail Free cards held */
   getOutOfJailFreeCards: number;
+  /** Whether the player has been declared bankrupt and is out of the game */
+  isBankrupt?: boolean;
 }
 
 export interface RentSchedule {
@@ -105,6 +107,7 @@ export interface LedgerEntry {
     | "tax"
     | "build"
     | "trade"
+    | "bankruptcy"
     | "salary"
     | "card";
   fromPlayerId?: PlayerId;

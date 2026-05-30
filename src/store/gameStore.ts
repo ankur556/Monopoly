@@ -95,21 +95,33 @@ const INITIAL_PLAYERS: Player[] = [
   {
     id: "p1", name: "Player 1", balance: 1500, position: 0,
     inJail: false, jailTurns: 0, doublesCount: 0, getOutOfJailFreeCards: 0,
+    isBankrupt: false,
   },
   {
     id: "p2", name: "Player 2", balance: 1500, position: 0,
     inJail: false, jailTurns: 0, doublesCount: 0, getOutOfJailFreeCards: 0,
+    isBankrupt: false,
   },
 ];
 
 const HUGE_RENT_THRESHOLD = 100;
 
-function nextPlayerIndex(current: number, total: number): number {
-  return (current + 1) % total;
+function nextPlayerIndex(current: number, players: Player[]): number {
+  const total = players.length;
+  if (total === 0) return 0;
+  for (let i = 1; i <= total; i++) {
+    const idx = (current + i) % total;
+    const p = players[idx];
+    if (!p.isBankrupt) return idx;
+  }
+  return current;
 }
 
 function getOpponentId(players: Player[], currentId: PlayerId): PlayerId {
-  return players.find((p) => p.id !== currentId)!.id;
+  const opp = players.find((p) => p.id !== currentId && !p.isBankrupt);
+  if (opp) return opp.id;
+  const any = players.find((p) => p.id !== currentId);
+  return any ? any.id : currentId;
 }
 
 function emptyDraft(senderId: PlayerId, receiverId: PlayerId): TradeOffer {
@@ -201,6 +213,40 @@ function transferMoney(
   });
 }
 
+function attemptPayment(
+  players: Player[],
+  squares: BoardSquare[],
+  fromId: PlayerId,
+  toId: PlayerId | null,
+  amount: number,
+): { players: Player[]; squares: BoardSquare[]; paid: number; bankrupt: boolean } {
+  const payer = players.find((p) => p.id === fromId);
+  if (!payer) return { players, squares, paid: 0, bankrupt: false };
+  const available = payer.balance;
+  if (available >= amount) {
+    const updatedPlayers = players.map((p) => {
+      if (p.id === fromId) return { ...p, balance: p.balance - amount };
+      if (toId && p.id === toId) return { ...p, balance: p.balance + amount };
+      return p;
+    });
+    return { players: updatedPlayers, squares, paid: amount, bankrupt: false };
+  }
+
+  // Insufficient funds -> partial pay whatever's available, then declare bankruptcy
+  const paid = available;
+  const updatedPlayers = players.map((p) => {
+    if (p.id === fromId) return { ...p, balance: 0, isBankrupt: true };
+    if (toId && p.id === toId) return { ...p, balance: p.balance + paid };
+    return p;
+  });
+
+  const updatedSquares = squares.map((sq) =>
+    sq.ownerId === fromId ? { ...sq, ownerId: toId ?? null, houses: 0 } : sq,
+  );
+
+  return { players: updatedPlayers, squares: updatedSquares, paid, bankrupt: true };
+}
+
 /** Build the ordered list of positions the token traverses, one step at a time. */
 function buildMovementQueue(start: number, roll: number): number[] {
   const steps: number[] = [];
@@ -266,6 +312,7 @@ export const useGameStore = create<GameState>((set, get) => {
       const player = state.players[playerIndex];
       let players = state.players;
       let ledger = state.ledger;
+      let squares = state.squares;
 
       set({ cardReveal: null, highlightedSquareId: null });
       state.showAnnouncement(`${title}\n${body}`, "card");
@@ -285,69 +332,87 @@ export const useGameStore = create<GameState>((set, get) => {
           break;
         }
         case "pay": {
-          const amt = Math.min(effect.amount, player.balance);
-          players = players.map((p, i) =>
-            i === playerIndex ? { ...p, balance: p.balance - amt } : p,
-          );
+          const payRes = attemptPayment(players, squares, player.id, null, effect.amount);
+          players = payRes.players;
+          squares = payRes.squares;
           ledger = appendLedger(ledger, {
             turn: state.turnNumber, type: "card",
-            fromPlayerId: player.id, amount: amt,
-            message: `${player.name} paid $${amt} (card)`,
+            fromPlayerId: player.id, amount: payRes.paid,
+            message: `${player.name} paid $${payRes.paid} (card)`,
           });
-          state.logAction(`${player.name} paid $${amt} from card`);
-          set({ players, ledger, turnPhase: "POST_ROLL" });
+          state.logAction(`${player.name} paid $${payRes.paid} from card`);
+          if (payRes.bankrupt) {
+            state.logAction(`${player.name} declared bankrupt while resolving a card`);
+            state.showAnnouncement(`${player.name} is BANKRUPT!`, "default");
+          }
+          set({ players, squares, ledger, turnPhase: "POST_ROLL" });
           break;
         }
         case "pay-each-player": {
-          const opponents = players.filter((_p, i) => i !== playerIndex);
-          const totalPay = Math.min(effect.amount * opponents.length, player.balance);
-          players = players.map((p, i) => {
-            if (i === playerIndex) return { ...p, balance: p.balance - totalPay };
-            return { ...p, balance: p.balance + effect.amount };
-          });
-          ledger = appendLedger(ledger, {
-            turn: state.turnNumber, type: "card",
-            fromPlayerId: player.id, amount: totalPay,
-            message: `${player.name} paid $${effect.amount} to each player (card)`,
-          });
-          state.logAction(`${player.name} paid $${effect.amount} to each player (card)`);
-          set({ players, ledger, turnPhase: "POST_ROLL" });
+          const opponents = players.filter((_p, i) => i !== playerIndex && !_p.isBankrupt);
+          for (const opp of opponents) {
+            const res = attemptPayment(players, squares, player.id, opp.id, effect.amount);
+            players = res.players;
+            squares = res.squares;
+            ledger = appendLedger(ledger, {
+              turn: state.turnNumber, type: "card",
+              fromPlayerId: player.id, toPlayerId: opp.id, amount: res.paid,
+              message: `${player.name} paid $${res.paid} to ${opp.name} (card)`,
+            });
+            state.logAction(`${player.name} paid $${res.paid} to ${opp.name} (card)`);
+            if (res.bankrupt) {
+              state.logAction(`${player.name} declared bankrupt while paying others (card)`);
+              state.showAnnouncement(`${player.name} is BANKRUPT!`, "default");
+              break;
+            }
+          }
+          set({ players, squares, ledger, turnPhase: "POST_ROLL" });
           break;
         }
         case "collect-from-each-player": {
-          const opponents = players.filter((_p, i) => i !== playerIndex);
-          const totalCollect = effect.amount * opponents.length;
-          players = players.map((p, i) => {
-            if (i === playerIndex) return { ...p, balance: p.balance + totalCollect };
-            return { ...p, balance: Math.max(0, p.balance - effect.amount) };
-          });
+          const opponents = players.filter((_p, i) => i !== playerIndex && !_p.isBankrupt);
+          let totalCollect = 0;
+          for (const opp of opponents) {
+            const res = attemptPayment(players, squares, opp.id, player.id, effect.amount);
+            players = res.players;
+            squares = res.squares;
+            totalCollect += res.paid;
+            ledger = appendLedger(ledger, {
+              turn: state.turnNumber, type: "card",
+              fromPlayerId: opp.id, toPlayerId: player.id, amount: res.paid,
+              message: `${player.name} collected $${res.paid} from ${opp.name} (card)`,
+            });
+            state.logAction(`${player.name} collected $${res.paid} from ${opp.name} (card)`);
+          }
           ledger = appendLedger(ledger, {
             turn: state.turnNumber, type: "card",
             toPlayerId: player.id, amount: totalCollect,
-            message: `${player.name} collected $${effect.amount} from each player (card)`,
+            message: `${player.name} collected $${totalCollect} total from other players (card)`,
           });
           state.logAction(`${player.name} collected $${totalCollect} total from other players (card)`);
-          set({ players, ledger, turnPhase: "POST_ROLL" });
+          set({ players, squares, ledger, turnPhase: "POST_ROLL" });
           break;
         }
         case "repairs": {
-          const ownedProps = state.squares.filter(sq => sq.ownerId === player.id && sq.type === "property");
+          const ownedProps = squares.filter(sq => sq.ownerId === player.id && sq.type === "property");
           const houseCount = ownedProps.reduce((sum, sq) => sum + Math.min(sq.houses, 4), 0);
           const hotelCount = ownedProps.reduce((sum, sq) => sum + (sq.houses >= 5 ? 1 : 0), 0);
-          const repairCost = Math.min(
-            houseCount * effect.houseCost + hotelCount * effect.hotelCost,
-            player.balance,
-          );
-          players = players.map((p, i) =>
-            i === playerIndex ? { ...p, balance: p.balance - repairCost } : p,
-          );
+          const desiredCost = houseCount * effect.houseCost + hotelCount * effect.hotelCost;
+          const res = attemptPayment(players, squares, player.id, null, desiredCost);
+          players = res.players;
+          squares = res.squares;
+          const repairCost = res.paid;
           ledger = appendLedger(ledger, {
             turn: state.turnNumber, type: "card",
             fromPlayerId: player.id, amount: repairCost,
             message: `${player.name} paid $${repairCost} for repairs (${houseCount}h + ${hotelCount} hotels)`,
           });
           state.logAction(`${player.name} paid $${repairCost} in repairs (card)`);
-          set({ players, ledger, turnPhase: "POST_ROLL" });
+          if (res.bankrupt) {
+            state.logAction(`${player.name} declared bankrupt while paying repairs`);
+            state.showAnnouncement(`${player.name} is BANKRUPT!`, "default");
+          }
+          set({ players, squares, ledger, turnPhase: "POST_ROLL" });
           break;
         }
         case "move": {
@@ -419,15 +484,14 @@ export const useGameStore = create<GameState>((set, get) => {
 
     endTurn: () => {
       const state = get() as InternalStore;
-      const totalPlayers = state.players.length;
-      const nextIndex = nextPlayerIndex(state.currentPlayerIndex, totalPlayers);
+      const nextIndex = nextPlayerIndex(state.currentPlayerIndex, state.players);
       const nextPlayer = state.players[nextIndex];
 
       set({
         currentPlayerIndex: nextIndex,
-        // Increment the round counter when the last player ends their turn
+        // Increment the round counter when we wrap around the player order
         turnNumber:
-          state.currentPlayerIndex === totalPlayers - 1
+          nextIndex <= state.currentPlayerIndex
             ? state.turnNumber + 1
             : state.turnNumber,
         turnPhase: "PRE_ROLL",
@@ -580,6 +644,7 @@ export const useGameStore = create<GameState>((set, get) => {
       const square = getSquareAtIndex(state.squares, player.position);
       let players = state.players;
       let ledger = state.ledger;
+      let squares = state.squares;
       const message = `${player.name} rolled ${roll}`;
 
       // Go To Jail
@@ -636,23 +701,27 @@ export const useGameStore = create<GameState>((set, get) => {
 
       // Tax
       if (square?.type === "tax" && square.taxAmount) {
-        const tax = Math.min(square.taxAmount, players[playerIndex].balance);
-        players = players.map((p, i) =>
-          i === playerIndex ? { ...p, balance: p.balance - tax } : p,
-        );
+        const taxRes = attemptPayment(players, squares, player.id, null, square.taxAmount);
+        players = taxRes.players;
+        squares = taxRes.squares;
         ledger = appendLedger(ledger, {
           turn: state.turnNumber,
           type: "tax",
           fromPlayerId: player.id,
-          amount: tax,
-          message: `${player.name} paid $${tax} in taxes`,
+          amount: taxRes.paid,
+          message: `${player.name} paid $${taxRes.paid} in taxes`,
         });
-        state.logAction(`${player.name} paid $${tax} (${square.name})`);
+        state.logAction(`${player.name} paid $${taxRes.paid} (${square.name})`);
+        if (taxRes.bankrupt) {
+          state.logAction(`${player.name} declared bankrupt while paying taxes`);
+          state.showAnnouncement(`${player.name} is BANKRUPT!`, "default");
+        }
         set({
           players,
+          squares,
           ledger,
           isRolling: false,
-          message: `${message}, paid $${tax} (${square.name}).`,
+          message: `${message}, paid $${taxRes.paid} (${square.name}).`,
           turnPhase: "POST_ROLL",
         });
         return;
@@ -668,32 +737,38 @@ export const useGameStore = create<GameState>((set, get) => {
         const owner = players.find((p) => p.id === square.ownerId)!;
         const rentAmount = calculateRent(
           square,
-          state.squares,
+          squares,
           roll,
           getGroupIds(square),
         );
-        const rent = Math.min(rentAmount, players[playerIndex].balance);
-        players = transferMoney(players, player.id, owner.id, rent);
+        const payRes = attemptPayment(players, squares, player.id, owner.id, rentAmount);
+        players = payRes.players;
+        squares = payRes.squares;
         ledger = appendLedger(ledger, {
           turn: state.turnNumber,
           type: "rent",
           fromPlayerId: player.id,
           toPlayerId: owner.id,
-          amount: rent,
+          amount: payRes.paid,
           propertyId: square.id,
-          message: `${player.name} paid $${rent} rent on ${square.name}`,
+          message: `${player.name} paid $${payRes.paid} rent on ${square.name}`,
         });
         state.logAction(
-          `${player.name} paid $${rent} rent to ${owner.name} (${square.name})`,
+          `${player.name} paid $${payRes.paid} rent to ${owner.name} (${square.name})`,
         );
-        if (rent >= HUGE_RENT_THRESHOLD) {
-          state.showAnnouncement(`RENT PAID!\n$${rent}`, "rent");
+        if (payRes.paid >= HUGE_RENT_THRESHOLD) {
+          state.showAnnouncement(`RENT PAID!\n$${payRes.paid}`, "rent");
+        }
+        if (payRes.bankrupt) {
+          state.logAction(`${player.name} declared bankrupt while paying rent`);
+          state.showAnnouncement(`${player.name} is BANKRUPT!`, "default");
         }
         set({
           players,
+          squares,
           ledger,
           isRolling: false,
-          message: `${message}, paid $${rent} rent to ${owner.name} for ${square.name}.`,
+          message: `${message}, paid $${payRes.paid} rent to ${owner.name} for ${square.name}.`,
           turnPhase: "POST_ROLL",
         });
         return;
@@ -813,28 +888,24 @@ export const useGameStore = create<GameState>((set, get) => {
 
         if (newJailTurns >= 3) {
           // Third failed roll — forced pay $50, then move
-          const fine = Math.min(50, player.balance);
-          let players = state.players.map((p, i) =>
-            i === state.currentPlayerIndex
-              ? {
-                  ...p,
-                  balance: p.balance - fine,
-                  inJail: false,
-                  jailTurns: 0,
-                  doublesCount: 0,
-                }
-              : p,
-          );
+          const payRes = attemptPayment(state.players, state.squares, player.id, null, 50);
+          let players = payRes.players;
+          let squares = payRes.squares;
           let ledger = appendLedger(state.ledger, {
             turn: state.turnNumber, type: "tax",
-            fromPlayerId: player.id, amount: fine,
+            fromPlayerId: player.id, amount: payRes.paid,
             message: `${player.name} forced to pay $50 jail fine after 3rd failed roll`,
           });
-          state.logAction(`${player.name} paid forced $50 fine and moves ${total}`);
-          state.showAnnouncement("3RD ROLL FAILED!\nForced $50 Fine", "jail");
-          set({ players, ledger, isRolling: true, turnPhase: "ROLLING" });
+          state.logAction(`${player.name} paid forced $${payRes.paid} fine and moves ${total}`);
+          if (payRes.bankrupt) {
+            state.logAction(`${player.name} declared bankrupt while paying jail fine`);
+            state.showAnnouncement(`${player.name} is BANKRUPT!`, "default");
+          } else {
+            state.showAnnouncement("3RD ROLL FAILED!\nForced $50 Fine", "jail");
+          }
+          set({ players, squares, ledger, isRolling: true, turnPhase: "ROLLING" });
           const queue = buildMovementQueue(
-            state.players[state.currentPlayerIndex].position,
+            players[state.currentPlayerIndex].position,
             total,
           );
           set({ movementQueue: queue, isMoving: false });
@@ -1153,7 +1224,7 @@ export const useGameStore = create<GameState>((set, get) => {
       const newBids = { ...auction.bids, [bidder.id]: amount };
 
       const activePlayers = players.filter(
-        (p) => !auction.passedPlayerIds.includes(p.id),
+        (p) => !auction.passedPlayerIds.includes(p.id) && !p.isBankrupt,
       );
 
       if (activePlayers.length === 1) {
@@ -1184,7 +1255,10 @@ export const useGameStore = create<GameState>((set, get) => {
       }
 
       let nextIdx = (auction.currentBidderIndex + 1) % players.length;
-      while (auction.passedPlayerIds.includes(players[nextIdx].id)) {
+      while (
+        auction.passedPlayerIds.includes(players[nextIdx].id) ||
+        players[nextIdx].isBankrupt
+      ) {
         nextIdx = (nextIdx + 1) % players.length;
       }
 
