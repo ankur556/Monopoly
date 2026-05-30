@@ -76,6 +76,49 @@ export function TradeModal() {
         {/* COMPOSING VIEW */}
         {isComposing && composingAsSender && (
           <>
+            {/* ── Receiver picker ───────────────────────────────────────── */}
+            {players.filter((p) => p.id !== sender.id).length > 1 && (
+              <div className="mb-5 rounded-2xl border border-white/10 bg-white/5 p-4">
+                <p className="mb-2 text-xs font-black uppercase tracking-widest text-white/50">
+                  Trade with
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {players
+                    .filter((p) => p.id !== sender.id)
+                    .map((p) => {
+                      const isSelected = draft.receiverId === p.id;
+                      return (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => {
+                            if (isSelected) return;
+                            // Switch receiver and clear property / card selections
+                            updateTradeDraft({
+                              receiverId: p.id,
+                              propertiesOfferedBySender: [],
+                              propertiesOfferedByReceiver: [],
+                              jailCardsOfferedBySender: 0,
+                              jailCardsOfferedByReceiver: 0,
+                            });
+                          }}
+                          className={`flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition ${
+                            isSelected
+                              ? "bg-amber-500 text-white shadow-lg shadow-amber-500/30"
+                              : "bg-white/10 text-white/70 hover:bg-white/20 hover:text-white"
+                          }`}
+                        >
+                          <span>{p.name}</span>
+                          <span className="text-xs opacity-60">
+                            ${p.balance.toLocaleString()}
+                          </span>
+                        </button>
+                      );
+                    })}
+                </div>
+              </div>
+            )}
+
             {/* Deal Board */}
             <div className="grid gap-4 sm:grid-cols-2">
 
