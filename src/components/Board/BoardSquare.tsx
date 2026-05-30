@@ -39,10 +39,8 @@ const PLAYER_TILE_GLOW: Record<string, string> = {
   p6: "animate-player-tile-glow-p6",
 };
 
-// ── Top band colour for every square type ────────────────────────────────
-// Properties use their colorGroup colour; specials use a type-specific accent.
-const COLOR_BAND_HEX: Record<string, string> = {
-  // color groups
+// ── Property colour bands (thin stripe at top) ───────────────────────────
+const PROPERTY_BAND_HEX: Record<string, string> = {
   brown: "#8B4513",
   "light-blue": "#87CEEB",
   pink: "#FF69B4",
@@ -53,31 +51,56 @@ const COLOR_BAND_HEX: Record<string, string> = {
   "dark-blue": "#00008B",
   railroad: "#2F2F2F",
   utility: "#9ca3af",
-  // special types
-  go: "#dc2626",
-  chance: "#f59e0b",
-  chest: "#3b82f6",
-  tax: "#71717a",
-  jail: "#f59e0b",
-  "free-parking": "#10b981",
-  "go-to-jail": "#27272a",
 };
 
-// ── Square label / icon ───────────────────────────────────────────────────
-const SQUARE_ICON: Partial<Record<string, string>> = {
-  go: "▶",
-  chance: "?",
-  chest: "☁",
-  tax: "💰",
-  jail: "🔒",
-  "free-parking": "🅿",
-  "go-to-jail": "👮",
-  railroad: "🚂",
+// ── Special square styling (full gradient + icon + label) ─────────────────
+// Each entry: gradient string, text colour (light/dark), emoji icon
+const SPECIAL_CONFIG: Record<
+  string,
+  { grad: string; textColor: string; icon: string; label?: string }
+> = {
+  go: {
+    grad: "linear-gradient(135deg,#ef4444 0%,#b91c1c 100%)",
+    textColor: "#ffffff",
+    icon: "▶",
+    label: "GO",
+  },
+  chance: {
+    grad: "linear-gradient(135deg,#f59e0b 0%,#d97706 100%)",
+    textColor: "#1c1917",
+    icon: "?",
+    label: "CHANCE",
+  },
+  chest: {
+    grad: "linear-gradient(135deg,#38bdf8 0%,#2563eb 100%)",
+    textColor: "#ffffff",
+    icon: "☁",
+    label: "CHEST",
+  },
+  tax: {
+    grad: "linear-gradient(135deg,#6b7280 0%,#374151 100%)",
+    textColor: "#f9fafb",
+    icon: "💰",
+  },
+  jail: {
+    grad: "linear-gradient(135deg,#fde68a 0%,#f59e0b 100%)",
+    textColor: "#1c1917",
+    icon: "🔒",
+    label: "JAIL",
+  },
+  "free-parking": {
+    grad: "linear-gradient(135deg,#34d399 0%,#059669 100%)",
+    textColor: "#ffffff",
+    icon: "🅿",
+    label: "FREE",
+  },
+  "go-to-jail": {
+    grad: "linear-gradient(135deg,#374151 0%,#111827 100%)",
+    textColor: "#f9fafb",
+    icon: "👮",
+    label: "GO TO JAIL",
+  },
 };
-
-function getUtilityIcon(id: string) {
-  return id === "sq12" ? "⚡" : "🚰";
-}
 
 function getPlayersOnSquare(players: Player[], boardIndex: number): Player[] {
   return players.filter((p) => p.position === boardIndex);
@@ -97,10 +120,14 @@ export function BoardSquare({
   isHighlighted = false,
 }: BoardSquareProps) {
   const setSelectedPropertyId = useGameStore((s) => s.setSelectedPropertyId);
+
   const isPurchasable =
     square.type === "property" ||
     square.type === "railroad" ||
     square.type === "utility";
+
+  const isSpecial = !isPurchasable; // chance, chest, tax, go, jail, free-parking, go-to-jail
+  const specialCfg = isSpecial ? (SPECIAL_CONFIG[square.type] ?? null) : null;
 
   const playersHere = getPlayersOnSquare(players, square.boardIndex);
   const hasPlayers = playersHere.length > 0;
@@ -109,59 +136,113 @@ export function BoardSquare({
   const tileGlowClass = primaryPlayer ? (PLAYER_TILE_GLOW[primaryPlayer.id] ?? "") : "";
   const ownerRing = square.ownerId ? (PLAYER_OWNER_RING[square.ownerId] ?? "") : "";
 
-  // Background: player tint when present, else adaptive CSS variable
-  const tileBg = primaryPlayer
+  // Background for property tiles (with optional player tint)
+  const propertyBg = primaryPlayer
     ? (PLAYER_TILE_BG[primaryPlayer.id] ?? "var(--tile-bg)")
     : "var(--tile-bg)";
 
-  // ── Top band colour ────────────────────────────────────────────────────
-  const bandKey = square.colorGroup ?? square.type;
-  const bandHex = COLOR_BAND_HEX[bandKey] ?? "#a1a1aa";
+  // Property top-band colour
+  const bandHex = square.colorGroup
+    ? (PROPERTY_BAND_HEX[square.colorGroup] ?? "#a1a1aa")
+    : PROPERTY_BAND_HEX[square.type] ?? "#a1a1aa";
 
-  // ── Icon / label ──────────────────────────────────────────────────────
-  const icon =
-    square.type === "utility"
-      ? getUtilityIcon(square.id)
-      : (SQUARE_ICON[square.type] ?? null);
+  // Railroad / utility small icon
+  const propertyIcon =
+    square.type === "railroad"
+      ? "🚂"
+      : square.type === "utility"
+        ? square.id === "sq12"
+          ? "⚡"
+          : "🚰"
+        : null;
 
-  // Corner tiles render differently (horizontal layout, larger content)
-  if (isCorner) {
+  // ── Shared button wrapper classes ────────────────────────────────────────
+  const baseClass = `
+    group relative flex h-full w-full overflow-hidden
+    border border-black/25 text-left shadow-sm transition
+    hover:z-10 hover:shadow-md disabled:cursor-default
+    ${ownerRing}
+    ${isHighlighted ? "animate-square-pulse z-10 ring-2 ring-amber-400 ring-offset-1" : ""}
+    ${tileGlowClass}
+  `;
+
+  // ════════════════════════════════════════════════════════════
+  // SPECIAL SQUARES — full gradient, big icon, label
+  // ════════════════════════════════════════════════════════════
+  if (isSpecial && specialCfg) {
+    // When a player is on this square, overlay a tinted veil instead of replacing the gradient
+    const overlayStyle = primaryPlayer
+      ? { backgroundColor: PLAYER_TILE_BG[primaryPlayer.id] ?? "transparent" }
+      : undefined;
+
     return (
       <button
         type="button"
-        disabled={!isPurchasable}
-        onClick={() => isPurchasable && setSelectedPropertyId(square.id)}
-        className={`
-          group relative flex h-full w-full flex-col overflow-hidden
-          border border-black/20 text-left shadow-sm transition
-          hover:z-10 hover:shadow-md disabled:cursor-default
-          ${ownerRing}
-          ${isHighlighted ? "animate-square-pulse z-10 ring-2 ring-amber-400 ring-offset-1" : ""}
-          ${tileGlowClass}
-        `}
-        style={{ backgroundColor: tileBg }}
+        disabled
+        className={`${baseClass} flex-col items-center justify-center`}
+        style={{ background: specialCfg.grad }}
       >
-        {/* Colour accent strip */}
-        <div style={{ height: 5, backgroundColor: bandHex, width: "100%", flexShrink: 0 }} />
+        {/* Semi-transparent player tint overlay */}
+        {primaryPlayer && (
+          <div
+            className="absolute inset-0 pointer-events-none"
+            style={{ ...overlayStyle, opacity: 0.35 }}
+          />
+        )}
 
-        {/* Corner body — centred */}
-        <div className="flex flex-1 flex-col items-center justify-center gap-0.5 px-1 py-0.5" style={{ color: "var(--tile-text)" }}>
-          {icon && <span className="text-sm leading-none">{icon}</span>}
-          <span className="text-center text-[7px] font-black leading-tight sm:text-[8px]" style={{ color: "var(--tile-text)" }}>
-            {square.name}
+        {/* Content */}
+        <div
+          className="relative flex h-full w-full flex-col items-center justify-center gap-px px-0.5 py-0.5"
+          style={{ color: specialCfg.textColor }}
+        >
+          {/* Big icon */}
+          <span
+            className="leading-none select-none"
+            style={{
+              fontSize: isCorner ? "1.25rem" : "0.875rem",
+              filter: "drop-shadow(0 1px 2px rgba(0,0,0,0.4))",
+            }}
+          >
+            {specialCfg.icon}
           </span>
+
+          {/* Label */}
+          <span
+            className="text-center font-black leading-tight tracking-tight select-none"
+            style={{
+              fontSize: isCorner ? "0.5rem" : "0.4rem",
+              textShadow: "0 1px 2px rgba(0,0,0,0.5)",
+              writingMode: isCorner ? "horizontal-tb" : "vertical-rl",
+              textOrientation: "mixed",
+              maxHeight: isCorner ? undefined : "100%",
+              overflow: "hidden",
+            }}
+          >
+            {specialCfg.label ?? square.name}
+          </span>
+
+          {/* Tax amount */}
           {square.type === "tax" && square.taxAmount && (
-            <span className="text-[6px] font-medium" style={{ color: "var(--tile-text)", opacity: 0.75 }}>${square.taxAmount}</span>
+            <span
+              className="text-center font-semibold leading-none"
+              style={{
+                fontSize: "0.35rem",
+                opacity: 0.85,
+                textShadow: "0 1px 1px rgba(0,0,0,0.4)",
+              }}
+            >
+              ${square.taxAmount}
+            </span>
           )}
         </div>
 
         {/* Player dots */}
         {hasPlayers && (
-          <div className="absolute right-0.5 top-0.5 flex flex-col gap-px">
+          <div className="absolute right-0.5 top-0.5 flex flex-col gap-px z-10">
             {playersHere.map((p) => (
               <span
                 key={p.id}
-                className="block h-1.5 w-1.5 rounded-full shadow-sm"
+                className="block h-1.5 w-1.5 rounded-full shadow-sm ring-1 ring-white/50"
                 style={{ backgroundColor: PLAYER_DOT_BG[p.id] ?? "#6b7280" }}
                 title={p.name}
               />
@@ -172,25 +253,18 @@ export function BoardSquare({
     );
   }
 
-  // ── Edge tiles (properties, railroads, utilities, chance, chest, tax…) ──
-  // ALL share the exact same structure so they look uniform:
-  //   [colour band] → [icon small] → [name vertical] → [price small]
+  // ════════════════════════════════════════════════════════════
+  // PROPERTY / RAILROAD / UTILITY — band + white bg + vertical text
+  // ════════════════════════════════════════════════════════════
   return (
     <button
       type="button"
       disabled={!isPurchasable}
       onClick={() => isPurchasable && setSelectedPropertyId(square.id)}
-      className={`
-        group relative flex h-full w-full flex-col items-center overflow-hidden
-        border border-black/20 text-left shadow-sm transition
-        hover:z-10 hover:shadow-md disabled:cursor-default
-        ${ownerRing}
-        ${isHighlighted ? "animate-square-pulse z-10 ring-2 ring-amber-400 ring-offset-1" : ""}
-        ${tileGlowClass}
-      `}
-      style={{ backgroundColor: tileBg }}
+      className={`${baseClass} flex-col items-center`}
+      style={{ backgroundColor: propertyBg }}
     >
-      {/* ── Top colour band — always present, sized to ~18% of tile height ── */}
+      {/* Colour band */}
       <div
         className="w-full shrink-0"
         style={{
@@ -198,20 +272,16 @@ export function BoardSquare({
           minHeight: 6,
           maxHeight: 14,
           backgroundColor: bandHex,
-          boxShadow: `0 1px 4px ${bandHex}99`,
+          boxShadow: `0 1px 4px ${bandHex}88`,
         }}
       />
 
-      {/* ── Tile body — same for ALL edge tiles ─────────────────────────── */}
+      {/* Body */}
       <div className="flex flex-1 flex-col items-center justify-between py-0.5">
-        {/* Small icon at top of body */}
-        {icon && (
-          <span className="text-[8px] leading-none" style={{ lineHeight: 1 }}>
-            {icon}
-          </span>
+        {propertyIcon && (
+          <span className="text-[8px] leading-none">{propertyIcon}</span>
         )}
 
-        {/* Name — always vertical for edge tiles */}
         <span
           className="flex-1 text-center text-[6px] font-bold leading-tight sm:text-[7px]"
           style={{
@@ -225,15 +295,12 @@ export function BoardSquare({
           {square.name}
         </span>
 
-        {/* Price or tax amount at bottom */}
         {square.price !== undefined && (
-          <span className="text-[5px] font-semibold sm:text-[6px]" style={{ color: "var(--tile-text)", opacity: 0.7 }}>
+          <span
+            className="text-[5px] font-semibold sm:text-[6px]"
+            style={{ color: "var(--tile-text)", opacity: 0.7 }}
+          >
             ${square.price}
-          </span>
-        )}
-        {square.type === "tax" && square.taxAmount && !square.price && (
-          <span className="text-[5px] font-semibold sm:text-[6px]" style={{ color: "var(--tile-text)", opacity: 0.7 }}>
-            ${square.taxAmount}
           </span>
         )}
       </div>
@@ -241,7 +308,7 @@ export function BoardSquare({
       {/* Building indicators */}
       <HouseIndicators houses={square.houses} />
 
-      {/* Owner strip at bottom */}
+      {/* Owner strip */}
       {square.ownerId && (
         <div
           className="absolute bottom-0 left-0 right-0"
@@ -253,7 +320,7 @@ export function BoardSquare({
         />
       )}
 
-      {/* Player presence dots — top-right corner */}
+      {/* Player dots */}
       {hasPlayers && (
         <div className="absolute right-0.5 top-0.5 flex flex-col gap-px">
           {playersHere.map((p) => (
