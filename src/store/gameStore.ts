@@ -25,6 +25,7 @@ import type {
   PlayerId,
   TradeOffer,
   TradeState,
+  TurnPhase,
 } from "../types/game";
 import { INITIAL_AUCTION_STATE, INITIAL_TRADE_STATE } from "../types/game";
 
@@ -33,6 +34,7 @@ interface GameState {
   squares: BoardSquare[];
   currentPlayerIndex: number;
   turnNumber: number;
+  turnPhase: TurnPhase;
   lastRoll: number | null;
   lastDie1: number | null;
   lastDie2: number | null;
@@ -76,11 +78,21 @@ interface GameState {
   // Auction actions
   placeBid: (amount: number) => void;
   passAuction: () => void;
+  // Jail actions
+  payJailFine: () => void;
+  useGetOutOfJailCard: () => void;
+  rollForJailBreak: () => void;
 }
 
 const INITIAL_PLAYERS: Player[] = [
-  { id: "p1", name: "Player 1", balance: 1500, position: 0, inJail: false },
-  { id: "p2", name: "Player 2", balance: 1500, position: 0, inJail: false },
+  {
+    id: "p1", name: "Player 1", balance: 1500, position: 0,
+    inJail: false, jailTurns: 0, doublesCount: 0, getOutOfJailFreeCards: 0,
+  },
+  {
+    id: "p2", name: "Player 2", balance: 1500, position: 0,
+    inJail: false, jailTurns: 0, doublesCount: 0, getOutOfJailFreeCards: 0,
+  },
 ];
 
 const HUGE_RENT_THRESHOLD = 100;
@@ -101,6 +113,8 @@ function emptyDraft(senderId: PlayerId, receiverId: PlayerId): TradeOffer {
     moneyOfferedByReceiver: 0,
     propertiesOfferedBySender: [],
     propertiesOfferedByReceiver: [],
+    jailCardsOfferedBySender: 0,
+    jailCardsOfferedByReceiver: 0,
   };
 }
 
@@ -134,6 +148,12 @@ function validateDraft(
   if (draft.moneyOfferedByReceiver > receiver.balance) {
     return "Cannot request more cash than opponent has.";
   }
+  if ((draft.jailCardsOfferedBySender ?? 0) > sender.getOutOfJailFreeCards) {
+    return "You don't have enough GOOJF cards to offer.";
+  }
+  if ((draft.jailCardsOfferedByReceiver ?? 0) > receiver.getOutOfJailFreeCards) {
+    return "Opponent doesn't have that many GOOJF cards.";
+  }
 
   for (const id of draft.propertiesOfferedBySender) {
     const sq = squares.find((s) => s.id === id);
@@ -152,7 +172,9 @@ function validateDraft(
     draft.moneyOfferedBySender > 0 ||
     draft.moneyOfferedByReceiver > 0 ||
     draft.propertiesOfferedBySender.length > 0 ||
-    draft.propertiesOfferedByReceiver.length > 0;
+    draft.propertiesOfferedByReceiver.length > 0 ||
+    (draft.jailCardsOfferedBySender ?? 0) > 0 ||
+    (draft.jailCardsOfferedByReceiver ?? 0) > 0;
 
   if (!hasAssets) return "Trade must include at least one asset.";
   return null;
@@ -182,7 +204,7 @@ function buildMovementQueue(start: number, roll: number): number[] {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-type InternalStore = GameState & { _resolveLanding: () => void };
+type InternalStore = GameState & { _resolveLanding: (rolledDoubles: boolean) => void };
 
 export const useGameStore = create<GameState>((set, get) => {
   const store: InternalStore = {
@@ -190,6 +212,7 @@ export const useGameStore = create<GameState>((set, get) => {
     squares: createInitialSquares(),
     currentPlayerIndex: 0,
     turnNumber: 1,
+    turnPhase: "PRE_ROLL",
     lastRoll: null,
     lastDie1: null,
     lastDie2: null,
@@ -239,7 +262,6 @@ export const useGameStore = create<GameState>((set, get) => {
       set({ cardReveal: null, highlightedSquareId: null });
       state.showAnnouncement(`${title}\n${body}`, "card");
 
-      // Execute the card's typed effect
       switch (effect.type) {
         case "collect": {
           players = players.map((p, i) =>
@@ -251,7 +273,7 @@ export const useGameStore = create<GameState>((set, get) => {
             message: `${player.name} collected $${effect.amount} (card)`,
           });
           state.logAction(`${player.name} collected $${effect.amount} from card`);
-          set({ players, ledger });
+          set({ players, ledger, turnPhase: "POST_ROLL" });
           break;
         }
         case "pay": {
@@ -265,7 +287,7 @@ export const useGameStore = create<GameState>((set, get) => {
             message: `${player.name} paid $${amt} (card)`,
           });
           state.logAction(`${player.name} paid $${amt} from card`);
-          set({ players, ledger });
+          set({ players, ledger, turnPhase: "POST_ROLL" });
           break;
         }
         case "pay-each-player": {
@@ -281,7 +303,7 @@ export const useGameStore = create<GameState>((set, get) => {
             message: `${player.name} paid $${effect.amount} to each player (card)`,
           });
           state.logAction(`${player.name} paid $${effect.amount} to each player (card)`);
-          set({ players, ledger });
+          set({ players, ledger, turnPhase: "POST_ROLL" });
           break;
         }
         case "collect-from-each-player": {
@@ -297,7 +319,7 @@ export const useGameStore = create<GameState>((set, get) => {
             message: `${player.name} collected $${effect.amount} from each player (card)`,
           });
           state.logAction(`${player.name} collected $${totalCollect} total from other players (card)`);
-          set({ players, ledger });
+          set({ players, ledger, turnPhase: "POST_ROLL" });
           break;
         }
         case "repairs": {
@@ -317,7 +339,7 @@ export const useGameStore = create<GameState>((set, get) => {
             message: `${player.name} paid $${repairCost} for repairs (${houseCount}h + ${hotelCount} hotels)`,
           });
           state.logAction(`${player.name} paid $${repairCost} in repairs (card)`);
-          set({ players, ledger });
+          set({ players, ledger, turnPhase: "POST_ROLL" });
           break;
         }
         case "move": {
@@ -340,7 +362,7 @@ export const useGameStore = create<GameState>((set, get) => {
             message: `${player.name} moved to square ${dest} (card)`,
           });
           state.logAction(`${player.name} moved to square ${dest} via card`);
-          set({ players, ledger });
+          set({ players, ledger, turnPhase: "POST_ROLL" });
           break;
         }
         case "move-back": {
@@ -349,24 +371,36 @@ export const useGameStore = create<GameState>((set, get) => {
             i === playerIndex ? { ...p, position: newPos } : p,
           );
           state.logAction(`${player.name} moved back ${effect.spaces} spaces (card)`);
-          set({ players, ledger });
+          set({ players, ledger, turnPhase: "POST_ROLL" });
           break;
         }
         case "jail": {
+          // Jail is instant — reset player and end turn immediately
           players = players.map((p, i) =>
-            i === playerIndex ? { ...p, position: 10, inJail: true } : p,
+            i === playerIndex
+              ? { ...p, position: 10, inJail: true, jailTurns: 0, doublesCount: 0 }
+              : p,
           );
           state.logAction(`${player.name} sent to Jail (card)`);
           set({ players, ledger });
+          state.endTurn();
           break;
         }
-        case "get-out-of-jail":
+        case "get-out-of-jail": {
+          players = players.map((p, i) =>
+            i === playerIndex
+              ? { ...p, getOutOfJailFreeCards: p.getOutOfJailFreeCards + 1 }
+              : p,
+          );
+          state.logAction(`${player.name} received a Get Out of Jail Free card`);
+          set({ players, ledger, turnPhase: "POST_ROLL" });
+          break;
+        }
         case "none":
         default:
+          set({ turnPhase: "POST_ROLL" });
           break;
       }
-
-      setTimeout(() => state.endTurn(), 2200);
     },
 
     setSelectedPropertyId: (id) => {
@@ -386,50 +420,91 @@ export const useGameStore = create<GameState>((set, get) => {
           state.currentPlayerIndex === 1
             ? state.turnNumber + 1
             : state.turnNumber,
+        turnPhase: "PRE_ROLL",
         lastRoll: null,
         lastDie1: null,
         lastDie2: null,
         pendingAction: null,
+        isRolling: false,
       });
 
-      const turnLabel = `${nextPlayer.name.toUpperCase()}'S TURN`;
+      const jailMsg = nextPlayer.inJail
+        ? ` (In Jail — Turn ${nextPlayer.jailTurns + 1}/3)`
+        : "";
+      const turnLabel = `${nextPlayer.name.toUpperCase()}'S TURN${jailMsg}`;
       state.logAction(`${nextPlayer.name}'s turn`);
       state.showAnnouncement(turnLabel, "turn");
-      set({ message: `${nextPlayer.name}, roll the dice.` });
+      set({
+        message: nextPlayer.inJail
+          ? `${nextPlayer.name}, you're in Jail. Pay $50, use a card, or roll for doubles.`
+          : `${nextPlayer.name}, roll the dice.`,
+      });
     },
 
     rollDice: () => {
       const state = get() as InternalStore;
       if (
+        state.turnPhase !== "PRE_ROLL" ||
         state.pendingAction ||
         state.trade.status !== "idle" ||
+        state.auction.status !== "idle" ||
         state.isRolling ||
         state.isMoving ||
-        state.cardReveal
+        state.cardReveal ||
+        state.players[state.currentPlayerIndex].inJail
       ) {
         return;
       }
+
       const die1 = Math.floor(Math.random() * 6) + 1;
       const die2 = Math.floor(Math.random() * 6) + 1;
       const total = die1 + die2;
+      const isDoubles = die1 === die2;
       const player = state.players[state.currentPlayerIndex];
+      const newDoublesCount = isDoubles ? player.doublesCount + 1 : 0;
+
+      state.logAction(`${player.name} rolled ${die1}+${die2}=${total}${isDoubles ? " (doubles!)" : ""}`);
+
+      // Three doubles in a row → instant jail
+      if (isDoubles && newDoublesCount >= 3) {
+        const players = state.players.map((p, i) =>
+          i === state.currentPlayerIndex
+            ? { ...p, position: 10, inJail: true, jailTurns: 0, doublesCount: 0 }
+            : p,
+        );
+        state.logAction(`${player.name} rolled 3 doubles — sent to Jail!`);
+        state.showAnnouncement("3 DOUBLES!\nGO TO JAIL!", "jail");
+        set({
+          players,
+          isRolling: false,
+          lastRoll: total,
+          lastDie1: die1,
+          lastDie2: die2,
+          message: `${player.name} rolled 3 doubles in a row — Go to Jail!`,
+        });
+        setTimeout(() => (get() as InternalStore).endTurn(), 1500);
+        return;
+      }
+
       const queue = buildMovementQueue(player.position, total);
-
-      state.logAction(`${player.name} rolled a ${total}`);
-
       set({
         isRolling: true,
+        turnPhase: "ROLLING",
         lastRoll: total,
         lastDie1: die1,
         lastDie2: die2,
         movementQueue: queue,
         isMoving: false,
+        players: state.players.map((p, i) =>
+          i === state.currentPlayerIndex
+            ? { ...p, doublesCount: newDoublesCount }
+            : p,
+        ),
       });
     },
 
     /**
      * Called by MovementController every 280ms while isRolling && movementQueue.length > 0.
-     * Moves the current player one square and checks for GO crossing.
      */
     stepToken: () => {
       const state = get() as InternalStore;
@@ -440,7 +515,6 @@ export const useGameStore = create<GameState>((set, get) => {
       const player = state.players[playerIndex];
       const isLastStep = remaining.length === 0;
 
-      // Detect passing GO: next position is numerically lower than current (wrapped around)
       const passedGo =
         nextPos < player.position ||
         (player.position === 39 && nextPos === 0);
@@ -466,14 +540,17 @@ export const useGameStore = create<GameState>((set, get) => {
       }
 
       if (isLastStep) {
+        const currentPlayer = updatedPlayers[playerIndex];
+        const rolledDoubles = currentPlayer.doublesCount > 0 &&
+          state.lastDie1 !== null && state.lastDie1 === state.lastDie2;
+
         set({
           players: updatedPlayers,
           ledger,
           movementQueue: [],
           isMoving: false,
         });
-        // Brief pause so the elastic land animation plays, then resolve
-        setTimeout(() => (get() as InternalStore)._resolveLanding(), 150);
+        setTimeout(() => (get() as InternalStore)._resolveLanding(rolledDoubles), 150);
       } else {
         set({
           players: updatedPlayers,
@@ -485,7 +562,7 @@ export const useGameStore = create<GameState>((set, get) => {
     },
 
     /** Internal: applies landing logic after token arrives at final square */
-    _resolveLanding: () => {
+    _resolveLanding: (rolledDoubles: boolean) => {
       const state = get() as InternalStore;
       const playerIndex = state.currentPlayerIndex;
       const player = state.players[playerIndex];
@@ -495,9 +572,12 @@ export const useGameStore = create<GameState>((set, get) => {
       let ledger = state.ledger;
       const message = `${player.name} rolled ${roll}`;
 
+      // Go To Jail
       if (square?.type === "go-to-jail") {
         players = players.map((p, i) =>
-          i === playerIndex ? { ...p, position: 10, inJail: true } : p,
+          i === playerIndex
+            ? { ...p, position: 10, inJail: true, jailTurns: 0, doublesCount: 0 }
+            : p,
         );
         state.logAction(`${player.name} was sent to Jail`);
         set({
@@ -508,18 +588,19 @@ export const useGameStore = create<GameState>((set, get) => {
           highlightedSquareId: square.id,
         });
         state.showAnnouncement("GO TO JAIL!", "jail");
-        state.endTurn();
-        set({ highlightedSquareId: null });
+        setTimeout(() => {
+          set({ highlightedSquareId: null });
+          (get() as InternalStore).endTurn();
+        }, 1200);
         return;
       }
 
+      // Chance / Community Chest
       if (square?.type === "chance" || square?.type === "chest") {
         const card =
           square.type === "chance" ? drawChanceCard() : drawCommunityChestCard();
         const title = square.type === "chance" ? "CHANCE" : "COMMUNITY CHEST";
-
         state.logAction(`${player.name} drew ${title}: ${card.text}`);
-
         set({
           players,
           ledger: appendLedger(ledger, {
@@ -543,6 +624,7 @@ export const useGameStore = create<GameState>((set, get) => {
         return;
       }
 
+      // Tax
       if (square?.type === "tax" && square.taxAmount) {
         const tax = Math.min(square.taxAmount, players[playerIndex].balance);
         players = players.map((p, i) =>
@@ -561,11 +643,12 @@ export const useGameStore = create<GameState>((set, get) => {
           ledger,
           isRolling: false,
           message: `${message}, paid $${tax} (${square.name}).`,
+          turnPhase: "POST_ROLL",
         });
-        state.endTurn();
         return;
       }
 
+      // Land on opponent's property — pay rent
       if (
         square &&
         isPurchasable(square) &&
@@ -593,25 +676,22 @@ export const useGameStore = create<GameState>((set, get) => {
         state.logAction(
           `${player.name} paid $${rent} rent to ${owner.name} (${square.name})`,
         );
-
         if (rent >= HUGE_RENT_THRESHOLD) {
           state.showAnnouncement(`RENT PAID!\n$${rent}`, "rent");
         }
-
         set({
           players,
           ledger,
           isRolling: false,
           message: `${message}, paid $${rent} rent to ${owner.name} for ${square.name}.`,
+          turnPhase: "POST_ROLL",
         });
-        state.endTurn();
         return;
       }
 
+      // Unowned purchasable property
       if (square && isPurchasable(square) && !square.ownerId) {
-        state.logAction(
-          `${player.name} landed on ${square.name} ($${square.price})`,
-        );
+        state.logAction(`${player.name} landed on ${square.name} ($${square.price})`);
         set({
           players,
           ledger,
@@ -622,6 +702,7 @@ export const useGameStore = create<GameState>((set, get) => {
         return;
       }
 
+      // Default — non-event square
       const squareLabel = square?.name ?? `square ${player.position}`;
       state.logAction(`${player.name} landed on ${squareLabel}`);
       set({
@@ -630,7 +711,139 @@ export const useGameStore = create<GameState>((set, get) => {
         isRolling: false,
         message: `${message} and landed on ${squareLabel}.`,
       });
-      state.endTurn();
+
+      // On doubles: allow another roll (PRE_ROLL), else POST_ROLL
+      if (rolledDoubles) {
+        set({ turnPhase: "PRE_ROLL" });
+        state.showAnnouncement("DOUBLES!\nRoll again!", "default");
+      } else {
+        set({ turnPhase: "POST_ROLL" });
+      }
+    },
+
+    // ─── Jail Actions ────────────────────────────────────────────────────────
+
+    payJailFine: () => {
+      const state = get() as InternalStore;
+      const player = state.players[state.currentPlayerIndex];
+      if (!player.inJail || state.turnPhase !== "PRE_ROLL") return;
+      if (player.balance < 50) {
+        set({ message: "You can't afford the $50 fine!" });
+        return;
+      }
+      const players = state.players.map((p, i) =>
+        i === state.currentPlayerIndex
+          ? { ...p, balance: p.balance - 50, inJail: false, jailTurns: 0, doublesCount: 0 }
+          : p,
+      );
+      const ledger = appendLedger(state.ledger, {
+        turn: state.turnNumber, type: "tax",
+        fromPlayerId: player.id, amount: 50,
+        message: `${player.name} paid $50 jail fine`,
+      });
+      state.logAction(`${player.name} paid $50 to leave jail`);
+      set({ players, ledger, message: `${player.name} paid the $50 fine. Roll the dice!` });
+    },
+
+    useGetOutOfJailCard: () => {
+      const state = get() as InternalStore;
+      const player = state.players[state.currentPlayerIndex];
+      if (!player.inJail || state.turnPhase !== "PRE_ROLL") return;
+      if (player.getOutOfJailFreeCards <= 0) {
+        set({ message: "You have no Get Out of Jail Free cards!" });
+        return;
+      }
+      const players = state.players.map((p, i) =>
+        i === state.currentPlayerIndex
+          ? {
+              ...p,
+              getOutOfJailFreeCards: p.getOutOfJailFreeCards - 1,
+              inJail: false,
+              jailTurns: 0,
+              doublesCount: 0,
+            }
+          : p,
+      );
+      state.logAction(`${player.name} used a Get Out of Jail Free card`);
+      state.showAnnouncement("GET OUT OF JAIL FREE!", "jail");
+      set({ players, message: `${player.name} used their Get Out of Jail Free card. Roll the dice!` });
+    },
+
+    rollForJailBreak: () => {
+      const state = get() as InternalStore;
+      const player = state.players[state.currentPlayerIndex];
+      if (!player.inJail || state.turnPhase !== "PRE_ROLL") return;
+      if (state.isRolling || state.isMoving) return;
+
+      const die1 = Math.floor(Math.random() * 6) + 1;
+      const die2 = Math.floor(Math.random() * 6) + 1;
+      const total = die1 + die2;
+      const isDoubles = die1 === die2;
+
+      state.logAction(
+        `${player.name} rolled ${die1}+${die2}=${total} in jail${isDoubles ? " — DOUBLES! Free!" : " — no doubles"}`,
+      );
+
+      set({ lastRoll: total, lastDie1: die1, lastDie2: die2 });
+
+      if (isDoubles) {
+        // Rolled doubles → free, move but no bonus roll
+        const players = state.players.map((p, i) =>
+          i === state.currentPlayerIndex
+            ? { ...p, inJail: false, jailTurns: 0, doublesCount: 0 }
+            : p,
+        );
+        state.showAnnouncement("DOUBLES!\nOut of Jail!", "jail");
+        set({ players, isRolling: true, turnPhase: "ROLLING" });
+        const queue = buildMovementQueue(player.position, total);
+        set({ movementQueue: queue, isMoving: false });
+        // After movement, doublesCount stays 0 so no bonus roll
+      } else {
+        const newJailTurns = player.jailTurns + 1;
+
+        if (newJailTurns >= 3) {
+          // Third failed roll — forced pay $50, then move
+          const fine = Math.min(50, player.balance);
+          let players = state.players.map((p, i) =>
+            i === state.currentPlayerIndex
+              ? {
+                  ...p,
+                  balance: p.balance - fine,
+                  inJail: false,
+                  jailTurns: 0,
+                  doublesCount: 0,
+                }
+              : p,
+          );
+          let ledger = appendLedger(state.ledger, {
+            turn: state.turnNumber, type: "tax",
+            fromPlayerId: player.id, amount: fine,
+            message: `${player.name} forced to pay $50 jail fine after 3rd failed roll`,
+          });
+          state.logAction(`${player.name} paid forced $50 fine and moves ${total}`);
+          state.showAnnouncement("3RD ROLL FAILED!\nForced $50 Fine", "jail");
+          set({ players, ledger, isRolling: true, turnPhase: "ROLLING" });
+          const queue = buildMovementQueue(
+            state.players[state.currentPlayerIndex].position,
+            total,
+          );
+          set({ movementQueue: queue, isMoving: false });
+        } else {
+          // Failed — increment jail turns, turn ends (no movement)
+          const players = state.players.map((p, i) =>
+            i === state.currentPlayerIndex
+              ? { ...p, jailTurns: newJailTurns }
+              : p,
+          );
+          state.logAction(`${player.name} failed jail roll (turn ${newJailTurns}/3)`);
+          set({
+            players,
+            isRolling: false,
+            turnPhase: "POST_ROLL",
+            message: `${player.name} failed to roll doubles (attempt ${newJailTurns}/3). Turn over.`,
+          });
+        }
+      }
     },
 
     buyProperty: () => {
@@ -674,9 +887,9 @@ export const useGameStore = create<GameState>((set, get) => {
         squares,
         ledger,
         pendingAction: null,
+        turnPhase: "POST_ROLL",
         message: `${player.name} bought ${square.name} for $${square.price}.`,
       });
-      state.endTurn();
     },
 
     declineBuy: () => {
@@ -691,7 +904,6 @@ export const useGameStore = create<GameState>((set, get) => {
       state.logAction(`${decliner.name} declined to buy ${square?.name ?? propertyId} — AUCTION STARTS`);
       state.showAnnouncement("AUCTION!\n" + (square?.name ?? ""), "default");
 
-      // Start the auction. The other player bids first (standard Monopoly rule).
       const firstBidderIndex = (state.currentPlayerIndex + 1) % state.players.length;
 
       set({
@@ -753,7 +965,15 @@ export const useGameStore = create<GameState>((set, get) => {
 
     openTrade: () => {
       const state = get() as InternalStore;
-      if (state.pendingAction || state.trade.status !== "idle") return;
+      // Trade can be opened in PRE_ROLL or POST_ROLL (never during movement or card reveal)
+      if (
+        state.pendingAction ||
+        state.trade.status !== "idle" ||
+        state.isMoving ||
+        state.isRolling ||
+        state.cardReveal ||
+        state.auction.status !== "idle"
+      ) return;
 
       const current = state.players[state.currentPlayerIndex];
       const opponentId = getOpponentId(state.players, current.id);
@@ -872,6 +1092,8 @@ export const useGameStore = create<GameState>((set, get) => {
         moneyOfferedByReceiver: prev.moneyOfferedBySender,
         propertiesOfferedBySender: [...prev.propertiesOfferedByReceiver],
         propertiesOfferedByReceiver: [...prev.propertiesOfferedBySender],
+        jailCardsOfferedBySender: prev.jailCardsOfferedByReceiver ?? 0,
+        jailCardsOfferedByReceiver: prev.jailCardsOfferedBySender ?? 0,
       };
 
       state.logAction(`${current.name} is countering the trade`);
@@ -903,7 +1125,6 @@ export const useGameStore = create<GameState>((set, get) => {
       const square = squares.find((s) => s.id === auction.propertyId);
       if (!square) return;
 
-      // Must exceed current highest bid and not exceed balance
       const currentHighest = Math.max(...Object.values(auction.bids));
       if (amount <= currentHighest) {
         set({ message: `Bid must be more than the current high of $${currentHighest}.` });
@@ -919,16 +1140,13 @@ export const useGameStore = create<GameState>((set, get) => {
       }
 
       state.logAction(`${bidder.name} bids $${amount} on ${square.name}`);
-
       const newBids = { ...auction.bids, [bidder.id]: amount };
 
-      // Advance to next non-passed bidder
       const activePlayers = players.filter(
         (p) => !auction.passedPlayerIds.includes(p.id),
       );
 
       if (activePlayers.length === 1) {
-        // Only one active — this bid wins immediately
         const winner = bidder;
         const winAmount = amount;
         const updatedPlayers = players.map((p) =>
@@ -950,12 +1168,11 @@ export const useGameStore = create<GameState>((set, get) => {
           }),
           auction: { ...INITIAL_AUCTION_STATE },
           message: `${winner.name} won ${square.name} at auction for $${winAmount}!`,
+          turnPhase: "POST_ROLL",
         });
-        setTimeout(() => (get() as InternalStore).endTurn(), 1800);
         return;
       }
 
-      // Move to next bidder in rotation (skip passed players)
       let nextIdx = (auction.currentBidderIndex + 1) % players.length;
       while (auction.passedPlayerIds.includes(players[nextIdx].id)) {
         nextIdx = (nextIdx + 1) % players.length;
@@ -981,77 +1198,47 @@ export const useGameStore = create<GameState>((set, get) => {
       if (!square) return;
 
       state.logAction(`${passer.name} passes on the auction`);
-
       const newPassed = [...auction.passedPlayerIds, passer.id];
       const stillActive = players.filter((p) => !newPassed.includes(p.id));
 
       if (stillActive.length === 0) {
-        // Everyone passed — property goes unsold
         state.logAction(`All players passed — ${square.name} goes unsold`);
         state.showAnnouncement("NO SALE!\n" + square.name, "default");
         set({
           auction: { ...INITIAL_AUCTION_STATE },
           message: `All players passed — ${square.name} remains unsold.`,
+          turnPhase: "POST_ROLL",
         });
-        setTimeout(() => (get() as InternalStore).endTurn(), 1400);
         return;
       }
 
       if (stillActive.length === 1) {
-        // Last remaining bidder wins at their highest bid
         const winner = stillActive[0];
-        const winAmount = auction.bids[winner.id] ?? 0;
-
-        if (winAmount === 0) {
-          // Winner never bid — gets it for free (or $1 minimum)
-          const finalAmount = 1;
-          const updatedPlayers = players.map((p) =>
-            p.id === winner.id ? { ...p, balance: p.balance - finalAmount } : p,
-          );
-          const updatedSquares = squares.map((s) =>
-            s.id === square.id ? { ...s, ownerId: winner.id } : s,
-          );
-          state.logAction(`${winner.name} wins ${square.name} for $${finalAmount} (last bidder)!`);
-          state.showAnnouncement(`SOLD!\n${square.name} → ${winner.name} $${finalAmount}`, "default");
-          set({
-            players: updatedPlayers,
-            squares: updatedSquares,
-            ledger: appendLedger(ledger, {
-              turn: turnNumber, type: "purchase",
-              fromPlayerId: winner.id, amount: finalAmount,
-              propertyId: square.id,
-              message: `${winner.name} won ${square.name} at auction for $${finalAmount}`,
-            }),
-            auction: { ...INITIAL_AUCTION_STATE },
-            message: `${winner.name} wins ${square.name} at auction for $${finalAmount}!`,
-          });
-        } else {
-          const updatedPlayers = players.map((p) =>
-            p.id === winner.id ? { ...p, balance: p.balance - winAmount } : p,
-          );
-          const updatedSquares = squares.map((s) =>
-            s.id === square.id ? { ...s, ownerId: winner.id } : s,
-          );
-          state.logAction(`${winner.name} wins auction for ${square.name} at $${winAmount}!`);
-          state.showAnnouncement(`SOLD!\n${square.name} → ${winner.name} $${winAmount}`, "default");
-          set({
-            players: updatedPlayers,
-            squares: updatedSquares,
-            ledger: appendLedger(ledger, {
-              turn: turnNumber, type: "purchase",
-              fromPlayerId: winner.id, amount: winAmount,
-              propertyId: square.id,
-              message: `${winner.name} won auction for ${square.name} at $${winAmount}`,
-            }),
-            auction: { ...INITIAL_AUCTION_STATE },
-            message: `${winner.name} wins ${square.name} at auction for $${winAmount}!`,
-          });
-        }
-        setTimeout(() => (get() as InternalStore).endTurn(), 1800);
+        const winAmount = Math.max(auction.bids[winner.id] ?? 0, 1);
+        const updatedPlayers = players.map((p) =>
+          p.id === winner.id ? { ...p, balance: p.balance - winAmount } : p,
+        );
+        const updatedSquares = squares.map((s) =>
+          s.id === square.id ? { ...s, ownerId: winner.id } : s,
+        );
+        state.logAction(`${winner.name} wins auction for ${square.name} at $${winAmount}!`);
+        state.showAnnouncement(`SOLD!\n${square.name} → ${winner.name} $${winAmount}`, "default");
+        set({
+          players: updatedPlayers,
+          squares: updatedSquares,
+          ledger: appendLedger(ledger, {
+            turn: turnNumber, type: "purchase",
+            fromPlayerId: winner.id, amount: winAmount,
+            propertyId: square.id,
+            message: `${winner.name} won auction for ${square.name} at $${winAmount}`,
+          }),
+          auction: { ...INITIAL_AUCTION_STATE },
+          message: `${winner.name} wins ${square.name} at auction for $${winAmount}!`,
+          turnPhase: "POST_ROLL",
+        });
         return;
       }
 
-      // More active bidders remain — next bidder's turn
       let nextIdx = (auction.currentBidderIndex + 1) % players.length;
       while (newPassed.includes(players[nextIdx].id)) {
         nextIdx = (nextIdx + 1) % players.length;

@@ -30,13 +30,52 @@ export function PlayerCard({ player, isCurrent }: PlayerCardProps) {
     >
       <div className="flex items-center gap-3">
         <span
-          className={`h-8 w-8 shrink-0 rounded-full shadow-md ring-2 ring-white/80 ${AVATAR[player.id] ?? "bg-zinc-500"}`}
-        />
-        <div>
-          <p className="font-semibold">{player.name}</p>
-          <p className="text-sm opacity-70">Balance: ${player.balance}</p>
-          <p className="text-sm opacity-70">Position: {player.position}</p>
+          className={`relative h-8 w-8 shrink-0 rounded-full shadow-md ring-2 ring-white/80 ${AVATAR[player.id] ?? "bg-zinc-500"}`}
+        >
+          {/* Jail lock overlay */}
+          {player.inJail && (
+            <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-orange-500 text-[8px]">
+              🔒
+            </span>
+          )}
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5">
+            <p className="truncate font-semibold">{player.name}</p>
+            {isCurrent && (
+              <span className="shrink-0 rounded-full bg-emerald-500/20 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wider text-emerald-400">
+                ▶ Turn
+              </span>
+            )}
+          </div>
+          <p className="text-sm opacity-70">
+            ${player.balance.toLocaleString()}
+          </p>
+          {/* Jail info */}
+          {player.inJail && (
+            <p className="text-[10px] font-semibold text-orange-400">
+              In Jail (attempt {player.jailTurns + 1}/3)
+            </p>
+          )}
+          {/* Doubles streak */}
+          {player.doublesCount > 0 && !player.inJail && (
+            <p className="text-[10px] font-semibold text-amber-400">
+              🎲 {player.doublesCount} double{player.doublesCount > 1 ? "s" : ""} in a row!
+            </p>
+          )}
         </div>
+        {/* GOOJF card badge */}
+        {player.getOutOfJailFreeCards > 0 && (
+          <div
+            title="Get Out of Jail Free card"
+            className="shrink-0 rounded-lg bg-purple-600/80 px-1.5 py-1 text-center"
+          >
+            <span className="block text-sm">🃏</span>
+            <span className="block text-[8px] font-black text-white">
+              ×{player.getOutOfJailFreeCards}
+            </span>
+          </div>
+        )}
       </div>
     </div>
   );

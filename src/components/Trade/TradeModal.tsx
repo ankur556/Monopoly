@@ -121,6 +121,31 @@ export function TradeModal() {
                   selectedIds={draft.propertiesOfferedBySender}
                   onChange={(ids) => updateTradeDraft({ propertiesOfferedBySender: ids })}
                 />
+
+                {/* GOOJF Cards */}
+                {sender.getOutOfJailFreeCards > 0 && (
+                  <div className="mt-3">
+                    <label className="mb-1 block text-xs font-semibold text-blue-300">
+                      🃏 Get Out of Jail Free cards ({sender.getOutOfJailFreeCards} held)
+                    </label>
+                    <input
+                      id="sender-goojf-input"
+                      type="number"
+                      min={0}
+                      max={sender.getOutOfJailFreeCards}
+                      value={draft.jailCardsOfferedBySender ?? 0}
+                      onChange={(e) =>
+                        updateTradeDraft({
+                          jailCardsOfferedBySender: Math.min(
+                            sender.getOutOfJailFreeCards,
+                            Math.max(0, Number(e.target.value) || 0),
+                          ),
+                        })
+                      }
+                      className="w-full rounded-lg border border-blue-400/30 bg-blue-900/30 px-3 py-1.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-400"
+                    />
+                  </div>
+                )}
               </div>
 
               {/* YOU WANT column */}
@@ -175,6 +200,31 @@ export function TradeModal() {
                   selectedIds={draft.propertiesOfferedByReceiver}
                   onChange={(ids) => updateTradeDraft({ propertiesOfferedByReceiver: ids })}
                 />
+
+                {/* GOOJF Cards */}
+                {receiver.getOutOfJailFreeCards > 0 && (
+                  <div className="mt-3">
+                    <label className="mb-1 block text-xs font-semibold text-amber-300">
+                      🃏 GOOJF cards from {receiver.name} ({receiver.getOutOfJailFreeCards} held)
+                    </label>
+                    <input
+                      id="receiver-goojf-input"
+                      type="number"
+                      min={0}
+                      max={receiver.getOutOfJailFreeCards}
+                      value={draft.jailCardsOfferedByReceiver ?? 0}
+                      onChange={(e) =>
+                        updateTradeDraft({
+                          jailCardsOfferedByReceiver: Math.min(
+                            receiver.getOutOfJailFreeCards,
+                            Math.max(0, Number(e.target.value) || 0),
+                          ),
+                        })
+                      }
+                      className="w-full rounded-lg border border-amber-400/30 bg-amber-900/30 px-3 py-1.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-amber-400"
+                    />
+                  </div>
+                )}
               </div>
             </div>
 
@@ -186,10 +236,16 @@ export function TradeModal() {
                 {draft.propertiesOfferedBySender.length > 0 && (
                   <> + <strong className="text-white">{draft.propertiesOfferedBySender.length} propert{draft.propertiesOfferedBySender.length > 1 ? "ies" : "y"}</strong></>
                 )}
+                {(draft.jailCardsOfferedBySender ?? 0) > 0 && (
+                  <> + <strong className="text-white">{draft.jailCardsOfferedBySender} GOOJF card{draft.jailCardsOfferedBySender! > 1 ? "s" : ""}</strong></>
+                )}
                 {" · "}
                 You get: <strong className="text-white">${draft.moneyOfferedByReceiver}</strong>
                 {draft.propertiesOfferedByReceiver.length > 0 && (
                   <> + <strong className="text-white">{draft.propertiesOfferedByReceiver.length} propert{draft.propertiesOfferedByReceiver.length > 1 ? "ies" : "y"}</strong></>
+                )}
+                {(draft.jailCardsOfferedByReceiver ?? 0) > 0 && (
+                  <> + <strong className="text-white">{draft.jailCardsOfferedByReceiver} GOOJF card{draft.jailCardsOfferedByReceiver! > 1 ? "s" : ""}</strong></>
                 )}
               </p>
             </div>

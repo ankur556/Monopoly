@@ -1,6 +1,7 @@
 import { useGameStore } from "../../store/gameStore";
 import { GlassPanel } from "../ui/GlassPanel";
 import { DiceControls } from "./DiceControls";
+import { JailOptions } from "./JailOptions";
 import { LedgerPanel } from "./LedgerPanel";
 import { PlayerCard } from "./PlayerCard";
 import { PropertyActions } from "./PropertyActions";
@@ -16,27 +17,59 @@ export function GamePanel() {
   const openTrade = useGameStore((s) => s.openTrade);
   const isMoving = useGameStore((s) => s.isMoving);
   const isRolling = useGameStore((s) => s.isRolling);
+  const cardReveal = useGameStore((s) => s.cardReveal);
+  const auctionStatus = useGameStore((s) => s.auction.status);
+  const turnPhase = useGameStore((s) => s.turnPhase);
 
+  // Trade is blocked only during movement, card reveal, pending buy, or active auction
   const tradeBlocked =
-    pendingAction !== null || trade.status !== "idle";
+    !!pendingAction ||
+    trade.status !== "idle" ||
+    isMoving ||
+    isRolling ||
+    !!cardReveal ||
+    auctionStatus !== "idle";
+
   const tradeOfferReceiver =
     trade.status === "pending" && trade.offer
       ? players.find((p) => p.id === trade.offer!.receiverId)
       : null;
 
+  const phaseLabel: Record<string, string> = {
+    PRE_ROLL: "Roll phase",
+    ROLLING: "Moving…",
+    POST_ROLL: "End turn when ready",
+  };
+
   return (
     <GlassPanel className="flex w-full max-w-sm flex-col gap-4 p-5 lg:max-w-xs">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-bold">Game Controls</h2>
-        <span className="text-xs opacity-60">Turn {turnNumber}</span>
+        <div className="text-right">
+          <span className="block text-xs opacity-60">Turn {turnNumber}</span>
+          <span
+            className={`block text-[9px] font-black uppercase tracking-widest ${
+              turnPhase === "PRE_ROLL"
+                ? "text-emerald-400"
+                : turnPhase === "ROLLING"
+                  ? "text-amber-400"
+                  : "text-violet-400"
+            }`}
+          >
+            {phaseLabel[turnPhase]}
+          </span>
+        </div>
       </div>
 
+      {/* Trade offer notification */}
       {trade.status === "pending" && tradeOfferReceiver && (
         <p className="rounded-lg bg-amber-500/15 px-3 py-2 text-xs font-medium text-amber-800 dark:text-amber-200">
           Trade offer awaiting {tradeOfferReceiver.name}
         </p>
       )}
 
+      {/* Player cards */}
       <div className="flex flex-col gap-2">
         {players.map((player, index) => (
           <PlayerCard
@@ -47,7 +80,13 @@ export function GamePanel() {
         ))}
       </div>
 
+      {/* Jail options — shown when current player is in jail PRE_ROLL */}
+      <JailOptions />
+
+      {/* Dice / End Turn controls */}
       <DiceControls />
+
+      {/* Property buy/pass actions */}
       <PropertyActions />
 
       {/* Movement progress indicator */}
@@ -60,9 +99,10 @@ export function GamePanel() {
         </div>
       )}
 
-      {/* Property Portfolio — universal house building */}
+      {/* Property Portfolio — house building */}
       <PropertyPortfolio />
 
+      {/* Trade button — available in PRE_ROLL and POST_ROLL */}
       <button
         id="propose-trade-btn"
         type="button"
@@ -71,7 +111,7 @@ export function GamePanel() {
         className="w-full rounded-xl border px-4 py-2.5 text-sm font-semibold transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
         style={{ borderColor: "var(--glass-border)" }}
       >
-        Propose Trade
+        🤝 Propose Trade
       </button>
 
       <LedgerPanel />

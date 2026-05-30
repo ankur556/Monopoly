@@ -23,6 +23,16 @@ export function executeTrade(
     return { ok: false, error: `${receiver.name} cannot afford the offered cash.` };
   }
 
+  const senderCards = offer.jailCardsOfferedBySender ?? 0;
+  const receiverCards = offer.jailCardsOfferedByReceiver ?? 0;
+
+  if (senderCards > 0 && sender.getOutOfJailFreeCards < senderCards) {
+    return { ok: false, error: `${sender.name} doesn't have enough GOOJF cards.` };
+  }
+  if (receiverCards > 0 && receiver.getOutOfJailFreeCards < receiverCards) {
+    return { ok: false, error: `${receiver.name} doesn't have enough GOOJF cards.` };
+  }
+
   for (const id of offer.propertiesOfferedBySender) {
     const sq = squares.find((s) => s.id === id);
     if (!sq || sq.ownerId !== sender.id) {
@@ -55,6 +65,8 @@ export function executeTrade(
           p.balance -
           offer.moneyOfferedBySender +
           offer.moneyOfferedByReceiver,
+        getOutOfJailFreeCards:
+          p.getOutOfJailFreeCards - senderCards + receiverCards,
       };
     }
     if (p.id === receiver.id) {
@@ -64,6 +76,8 @@ export function executeTrade(
           p.balance -
           offer.moneyOfferedByReceiver +
           offer.moneyOfferedBySender,
+        getOutOfJailFreeCards:
+          p.getOutOfJailFreeCards - receiverCards + senderCards,
       };
     }
     return p;

@@ -32,12 +32,25 @@ export type AnnouncementVariant =
   | "go"
   | "default";
 
+/**
+ * PRE_ROLL  — waiting for the player to roll (or choose jail options)
+ * ROLLING   — token is animating along the board
+ * POST_ROLL — player has landed; they must press "End Turn" to continue
+ */
+export type TurnPhase = "PRE_ROLL" | "ROLLING" | "POST_ROLL";
+
 export interface Player {
   id: PlayerId;
   name: string;
   balance: number;
   position: number;
   inJail: boolean;
+  /** How many consecutive failed jail-break rolls (0–3) */
+  jailTurns: number;
+  /** Consecutive doubles rolled this turn (resets on non-double or new turn) */
+  doublesCount: number;
+  /** Number of Get Out of Jail Free cards held */
+  getOutOfJailFreeCards: number;
 }
 
 export interface RentSchedule {
@@ -78,7 +91,7 @@ export interface CardReveal {
   title: string;
   body: string;
   squareId: string;
-  // The typed effect to execute when the card is dismissed
+  /** The typed effect to execute when the card is dismissed */
   effect: import("../data/cardDecks").CardEffect;
 }
 
@@ -108,6 +121,10 @@ export interface TradeOffer {
   moneyOfferedByReceiver: number;
   propertiesOfferedBySender: string[];
   propertiesOfferedByReceiver: string[];
+  /** Get Out of Jail Free cards offered by the sender */
+  jailCardsOfferedBySender: number;
+  /** Get Out of Jail Free cards offered by the receiver */
+  jailCardsOfferedByReceiver: number;
 }
 
 export type TradeStatus = "idle" | "composing" | "pending";

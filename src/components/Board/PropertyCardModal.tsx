@@ -19,6 +19,8 @@ export function PropertyCardModal() {
   const isMoving = useGameStore((s) => s.isMoving);
   const isRolling = useGameStore((s) => s.isRolling);
 
+  const lastRoll = useGameStore((s) => s.lastRoll);
+
   const square = squares.find((s) => s.id === selectedPropertyId);
   const owner = square?.ownerId
     ? players.find((p) => p.id === square.ownerId)
@@ -76,7 +78,12 @@ export function PropertyCardModal() {
         aria-label={`Property card: ${square.name}`}
       >
         {/* Physical deed card */}
-        <TitleDeedCard square={square} ownerName={owner?.name} />
+        <TitleDeedCard
+          square={square}
+          ownerName={owner?.name}
+          squares={squares}
+          lastDiceRoll={lastRoll ?? 7}
+        />
 
         {/* Monopoly badge */}
         {hasMonopoly && (
