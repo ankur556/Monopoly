@@ -75,6 +75,8 @@ export interface BoardSquare {
   houseCost?: number;
   taxAmount?: number;
   ownerId: PlayerId | null;
+  /** Whether the property is currently mortgaged */
+  mortgaged?: boolean;
   houses: number;
 }
 
@@ -108,6 +110,7 @@ export interface LedgerEntry {
     | "build"
     | "trade"
     | "bankruptcy"
+    | "mortgage"
     | "salary"
     | "card";
   fromPlayerId?: PlayerId;

@@ -7,7 +7,7 @@ import {
   drawChanceCard,
   drawCommunityChestCard,
 } from "../data/cardDecks";
-import { canBuildOn } from "../lib/building";
+import { canBuildOn, canSellOn } from "../lib/building";
 import { executeTrade } from "../lib/executeTrade";
 import { appendActionLog } from "../lib/events";
 import { getSquareAtIndex } from "../lib/gameLogic";
@@ -59,16 +59,24 @@ interface GameState {
   movementQueue: number[];
   /** True while the token is mid-journey (draining movementQueue) */
   isMoving: boolean;
+  /** Whether the game has ended due to a winner */
+  gameOver: boolean;
+  /** Winner player id when game is concluded */
+  winnerId: PlayerId | null;
   logAction: (text: string) => void;
   showAnnouncement: (text: string, variant?: AnnouncementVariant) => void;
   clearAnnouncement: () => void;
   completeCardReveal: () => void;
   rollDice: () => void;
+  processLanding: (playerId: PlayerId, position: number, rolledDoubles?: boolean) => void;
   /** Called by MovementController once per step interval */
   stepToken: () => void;
   buyProperty: () => void;
   declineBuy: () => void;
   buildHouse: (propertyId: string) => void;
+  sellHouse: (propertyId: string) => void;
+  mortgageProperty: (propertyId: string) => void;
+  unmortgageProperty: (propertyId: string) => void;
   endTurn: () => void;
   setSelectedPropertyId: (id: string | null) => void;
   setPropertyCardFlipped: (flipped: boolean) => void;
@@ -291,6 +299,8 @@ export const useGameStore = create<GameState>((set, get) => {
     isRolling: false,
     movementQueue: [],
     isMoving: false,
+    gameOver: false,
+    winnerId: null,
 
     logAction: (text) => {
       set((s) => ({ actionLog: appendActionLog(s.actionLog, text) }));
@@ -344,6 +354,7 @@ export const useGameStore = create<GameState>((set, get) => {
           if (payRes.bankrupt) {
             state.logAction(`${player.name} declared bankrupt while resolving a card`);
             state.showAnnouncement(`${player.name} is BANKRUPT!`, "default");
+            (get() as InternalStore).declareBankruptcy(player.id, null);
           }
           set({ players, squares, ledger, turnPhase: "POST_ROLL" });
           break;
@@ -363,6 +374,7 @@ export const useGameStore = create<GameState>((set, get) => {
             if (res.bankrupt) {
               state.logAction(`${player.name} declared bankrupt while paying others (card)`);
               state.showAnnouncement(`${player.name} is BANKRUPT!`, "default");
+              (get() as InternalStore).declareBankruptcy(player.id, opp.id);
               break;
             }
           }
@@ -383,6 +395,10 @@ export const useGameStore = create<GameState>((set, get) => {
               message: `${player.name} collected $${res.paid} from ${opp.name} (card)`,
             });
             state.logAction(`${player.name} collected $${res.paid} from ${opp.name} (card)`);
+            if (res.bankrupt) {
+              state.logAction(`${opp.name} declared bankrupt while paying ${player.name} (card)`);
+              (get() as InternalStore).declareBankruptcy(opp.id, player.id);
+            }
           }
           ledger = appendLedger(ledger, {
             turn: state.turnNumber, type: "card",
@@ -411,6 +427,7 @@ export const useGameStore = create<GameState>((set, get) => {
           if (res.bankrupt) {
             state.logAction(`${player.name} declared bankrupt while paying repairs`);
             state.showAnnouncement(`${player.name} is BANKRUPT!`, "default");
+            (get() as InternalStore).declareBankruptcy(player.id, null);
           }
           set({ players, squares, ledger, turnPhase: "POST_ROLL" });
           break;
@@ -435,7 +452,9 @@ export const useGameStore = create<GameState>((set, get) => {
             message: `${player.name} moved to square ${dest} (card)`,
           });
           state.logAction(`${player.name} moved to square ${dest} via card`);
-          set({ players, ledger, turnPhase: "POST_ROLL" });
+          // persist move, then immediately process landing
+          set({ players, squares, ledger, isRolling: false });
+          setTimeout(() => (get() as InternalStore).processLanding(player.id, dest, false), 20);
           break;
         }
         case "move-back": {
@@ -444,7 +463,8 @@ export const useGameStore = create<GameState>((set, get) => {
             i === playerIndex ? { ...p, position: newPos } : p,
           );
           state.logAction(`${player.name} moved back ${effect.spaces} spaces (card)`);
-          set({ players, ledger, turnPhase: "POST_ROLL" });
+          set({ players, squares, ledger, isRolling: false });
+          setTimeout(() => (get() as InternalStore).processLanding(player.id, newPos, false), 20);
           break;
         }
         case "jail": {
@@ -635,13 +655,13 @@ export const useGameStore = create<GameState>((set, get) => {
       }
     },
 
-    /** Internal: applies landing logic after token arrives at final square */
-    _resolveLanding: (rolledDoubles: boolean) => {
+    processLanding: (playerId: PlayerId, position: number, rolledDoubles = false) => {
       const state = get() as InternalStore;
-      const playerIndex = state.currentPlayerIndex;
+      const playerIndex = state.players.findIndex((p) => p.id === playerId);
+      if (playerIndex === -1) return;
       const player = state.players[playerIndex];
       const roll = state.lastRoll ?? 0;
-      const square = getSquareAtIndex(state.squares, player.position);
+      const square = getSquareAtIndex(state.squares, position);
       let players = state.players;
       let ledger = state.ledger;
       let squares = state.squares;
@@ -660,7 +680,7 @@ export const useGameStore = create<GameState>((set, get) => {
           ledger,
           isRolling: false,
           message: `${player.name} landed on Go To Jail.`,
-          highlightedSquareId: square.id,
+          highlightedSquareId: square!.id,
         });
         state.showAnnouncement("GO TO JAIL!", "jail");
         setTimeout(() => {
@@ -672,8 +692,7 @@ export const useGameStore = create<GameState>((set, get) => {
 
       // Chance / Community Chest
       if (square?.type === "chance" || square?.type === "chest") {
-        const card =
-          square.type === "chance" ? drawChanceCard() : drawCommunityChestCard();
+        const card = square.type === "chance" ? drawChanceCard() : drawCommunityChestCard();
         const title = square.type === "chance" ? "CHANCE" : "COMMUNITY CHEST";
         state.logAction(`${player.name} drew ${title}: ${card.text}`);
         set({
@@ -715,6 +734,8 @@ export const useGameStore = create<GameState>((set, get) => {
         if (taxRes.bankrupt) {
           state.logAction(`${player.name} declared bankrupt while paying taxes`);
           state.showAnnouncement(`${player.name} is BANKRUPT!`, "default");
+          // finalize bankruptcy
+          (get() as InternalStore).declareBankruptcy(player.id, null);
         }
         set({
           players,
@@ -762,6 +783,7 @@ export const useGameStore = create<GameState>((set, get) => {
         if (payRes.bankrupt) {
           state.logAction(`${player.name} declared bankrupt while paying rent`);
           state.showAnnouncement(`${player.name} is BANKRUPT!`, "default");
+          (get() as InternalStore).declareBankruptcy(player.id, owner.id);
         }
         set({
           players,
@@ -788,7 +810,7 @@ export const useGameStore = create<GameState>((set, get) => {
       }
 
       // Default — non-event square
-      const squareLabel = square?.name ?? `square ${player.position}`;
+      const squareLabel = square?.name ?? `square ${position}`;
       state.logAction(`${player.name} landed on ${squareLabel}`);
       set({
         players,
@@ -804,6 +826,67 @@ export const useGameStore = create<GameState>((set, get) => {
       } else {
         set({ turnPhase: "POST_ROLL" });
       }
+    },
+
+    _resolveLanding: (rolledDoubles: boolean) => {
+      const state = get() as InternalStore;
+      const playerIndex = state.currentPlayerIndex;
+      const player = state.players[playerIndex];
+      (get() as InternalStore).processLanding(player.id, player.position, rolledDoubles);
+    },
+
+    declareBankruptcy: (bankruptPlayerId: PlayerId, creditorId: PlayerId | null) => {
+      const state = get() as InternalStore;
+      let players = state.players.slice();
+      let squares = state.squares.slice();
+
+      const bpIndex = players.findIndex((p) => p.id === bankruptPlayerId);
+      if (bpIndex === -1) return;
+      const bankruptPlayer = players[bpIndex];
+
+      // Transfer remaining cash to creditor (if any)
+      if (creditorId) {
+        players = players.map((p) => {
+          if (p.id === creditorId) return { ...p, balance: p.balance + bankruptPlayer.balance };
+          if (p.id === bankruptPlayerId) return { ...p, balance: 0, isBankrupt: true };
+          return p;
+        });
+      } else {
+        players = players.map((p) => (p.id === bankruptPlayerId ? { ...p, balance: 0, isBankrupt: true } : p));
+      }
+
+      // Transfer properties to creditor or bank, and clear houses + mortgage
+      squares = squares.map((sq) =>
+        sq.ownerId === bankruptPlayerId
+          ? { ...sq, ownerId: creditorId ?? null, houses: 0, mortgaged: false }
+          : sq,
+      );
+
+      // Append ledger entry for bankruptcy
+      const ledger = appendLedger(state.ledger, {
+        turn: state.turnNumber,
+        type: "bankruptcy",
+        fromPlayerId: bankruptPlayerId,
+        toPlayerId: creditorId ?? undefined,
+        amount: bankruptPlayer.balance,
+        message: `${bankruptPlayer.name} declared bankruptcy${
+          creditorId ? ` to ${players.find((p) => p.id === creditorId)!.name}` : " to the Bank"
+        }`,
+      });
+
+      state.logAction(`${bankruptPlayer.name} declared bankruptcy`);
+
+      // Check for win condition
+      const activePlayers = players.filter((p) => !p.isBankrupt);
+      if (activePlayers.length === 1) {
+        const winner = activePlayers[0];
+        state.logAction(`${winner.name} has won the game!`);
+        state.showAnnouncement(`${winner.name} WINS!`, "turn");
+        set({ players, squares, ledger, gameOver: true, winnerId: winner.id });
+        return;
+      }
+
+      set({ players, squares, ledger });
     },
 
     // ─── Jail Actions ────────────────────────────────────────────────────────
@@ -900,6 +983,7 @@ export const useGameStore = create<GameState>((set, get) => {
           if (payRes.bankrupt) {
             state.logAction(`${player.name} declared bankrupt while paying jail fine`);
             state.showAnnouncement(`${player.name} is BANKRUPT!`, "default");
+            (get() as InternalStore).declareBankruptcy(player.id, null);
           } else {
             state.showAnnouncement("3RD ROLL FAILED!\nForced $50 Fine", "jail");
           }
@@ -1041,6 +1125,117 @@ export const useGameStore = create<GameState>((set, get) => {
           message: `${player.name} built a ${label} on ${square.name}`,
         }),
         message: `${player.name} built a ${label} on ${square.name} (-$${square.houseCost}).`,
+      });
+    },
+
+    sellHouse: (propertyId: string) => {
+      const state = get() as InternalStore;
+      const player = state.players[state.currentPlayerIndex];
+      const square = state.squares.find((s) => s.id === propertyId);
+      if (!square || square.ownerId !== player.id) return;
+      if (!canSellOn(square, state.squares, player.id)) {
+        set({ message: "Cannot sell house: must follow evenness rules." });
+        return;
+      }
+      if (!square.houseCost) return;
+
+      const sellPrice = Math.floor(square.houseCost / 2);
+      const squares = state.squares.map((s) =>
+        s.id === propertyId ? { ...s, houses: Math.max(0, s.houses - 1) } : s,
+      );
+      const players = state.players.map((p, i) =>
+        i === state.currentPlayerIndex ? { ...p, balance: p.balance + sellPrice } : p,
+      );
+
+      state.logAction(`${player.name} sold a house on ${square.name} (+$${sellPrice})`);
+      set({
+        players,
+        squares,
+        ledger: appendLedger(state.ledger, {
+          turn: state.turnNumber,
+          type: "build",
+          fromPlayerId: player.id,
+          amount: -sellPrice,
+          propertyId: square.id,
+          message: `${player.name} sold a house on ${square.name}`,
+        }),
+        message: `${player.name} sold a house on ${square.name} (+$${sellPrice}).`,
+      });
+    },
+
+    mortgageProperty: (propertyId: string) => {
+      const state = get() as InternalStore;
+      const player = state.players[state.currentPlayerIndex];
+      const square = state.squares.find((s) => s.id === propertyId);
+      if (!square || square.ownerId !== player.id) return;
+      if (square.mortgaged) return;
+      if (!square.price) return;
+
+      // If any houses exist on the color set, block mortgaging
+      if (square.colorGroup) {
+        const groupIds = COLOR_GROUP_MEMBERS[square.colorGroup];
+        const groupSquares = state.squares.filter((s) => groupIds.includes(s.id));
+        if (groupSquares.some((s) => s.houses > 0)) {
+          set({ message: "Sell all houses in the set before mortgaging." });
+          return;
+        }
+      }
+
+      const mortgageValue = Math.floor(square.price / 2);
+      const squares = state.squares.map((s) => (s.id === propertyId ? { ...s, mortgaged: true } : s));
+      const players = state.players.map((p, i) =>
+        i === state.currentPlayerIndex ? { ...p, balance: p.balance + mortgageValue } : p,
+      );
+
+      state.logAction(`${player.name} mortgaged ${square.name} (+$${mortgageValue})`);
+      set({
+        players,
+        squares,
+        ledger: appendLedger(state.ledger, {
+          turn: state.turnNumber,
+          type: "mortgage",
+          fromPlayerId: player.id,
+          amount: mortgageValue,
+          propertyId: square.id,
+          message: `${player.name} mortgaged ${square.name}`,
+        }),
+        message: `${player.name} mortgaged ${square.name} (+$${mortgageValue}).`,
+      });
+    },
+
+    unmortgageProperty: (propertyId: string) => {
+      const state = get() as InternalStore;
+      const player = state.players[state.currentPlayerIndex];
+      const square = state.squares.find((s) => s.id === propertyId);
+      if (!square || square.ownerId !== player.id) return;
+      if (!square.mortgaged) return;
+      if (!square.price) return;
+
+      const mortgageValue = Math.floor(square.price / 2);
+      const cost = Math.ceil(mortgageValue * 1.1);
+      if (player.balance < cost) {
+        set({ message: "Cannot unmortgage: insufficient funds." });
+        return;
+      }
+
+      const squares = state.squares.map((s) => (s.id === propertyId ? { ...s, mortgaged: false } : s));
+      const players = state.players.map((p, i) =>
+        i === state.currentPlayerIndex ? { ...p, balance: p.balance - cost } : p,
+      );
+
+      state.logAction(`${player.name} unmortgaged ${square.name} (-$${cost})`);
+      set({
+        players,
+        squares,
+        ledger: appendLedger(state.ledger, {
+          turn: state.turnNumber,
+          type: "mortgage",
+          fromPlayerId: player.id,
+          amount: -cost,
+          propertyId: square.id,
+          message: `${player.name} unmortgaged ${square.name}`,
+        }),
+        message: `${player.name} unmortgaged ${square.name} (-$${cost}).`,
       });
     },
 
