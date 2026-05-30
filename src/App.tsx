@@ -7,11 +7,13 @@ import { PropertyCardModal } from "./components/Board/PropertyCardModal";
 import { GamePanel } from "./components/GamePanel/GamePanel";
 import { StartMenu } from "./components/Menu/StartMenu";
 import { TradeModal } from "./components/Trade/TradeModal";
+import { GameOverScreen } from "./components/ui/GameOverScreen";
 import { ThemeToggle } from "./components/ui/ThemeToggle";
 
 export default function App() {
   const appScreen = useGameStore((s) => s.appScreen);
   const returnToMenu = useGameStore((s) => s.returnToMenu);
+  const gameOver = useGameStore((s) => s.gameOver);
 
   if (appScreen === "MENU") {
     return <StartMenu />;
@@ -49,6 +51,9 @@ export default function App() {
       <PropertyCardModal />
       <TradeModal />
       <AuctionModal />
+
+      {/* Game Over — shown on top of everything */}
+      {gameOver && <GameOverScreen />}
     </div>
   );
 }

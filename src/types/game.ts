@@ -160,6 +160,10 @@ export interface AuctionState {
   passedPlayerIds: PlayerId[];
   /** PlayerId of the winner (set when concluded), null = no winner (property unsold) */
   winnerId: PlayerId | null;
+  /** True when this auction is part of a voluntary bankruptcy property liquidation chain */
+  isBankruptcyAuction: boolean;
+  /** The bankrupt player whose properties are being auctioned (if isBankruptcyAuction) */
+  bankruptPlayerId: PlayerId | null;
 }
 
 export const INITIAL_AUCTION_STATE: AuctionState = {
@@ -169,6 +173,8 @@ export const INITIAL_AUCTION_STATE: AuctionState = {
   bids: {},
   passedPlayerIds: [],
   winnerId: null,
+  isBankruptcyAuction: false,
+  bankruptPlayerId: null,
 };
 
 /** @deprecated Use BoardSquare */

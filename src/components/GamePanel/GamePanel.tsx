@@ -20,6 +20,8 @@ export function GamePanel() {
   const cardReveal = useGameStore((s) => s.cardReveal);
   const auctionStatus = useGameStore((s) => s.auction.status);
   const turnPhase = useGameStore((s) => s.turnPhase);
+  const voluntaryBankruptcy = useGameStore((s) => s.voluntaryBankruptcy);
+  const currentPlayer = players[currentPlayerIndex];
 
   // Trade is blocked only during movement, card reveal, pending buy, or active auction
   const tradeBlocked =
@@ -29,6 +31,12 @@ export function GamePanel() {
     isRolling ||
     !!cardReveal ||
     auctionStatus !== "idle";
+
+  // Bankruptcy available when no blocking action is running and player isn't already bankrupt
+  const bankruptcyAvailable =
+    !tradeBlocked &&
+    (turnPhase === "PRE_ROLL" || turnPhase === "POST_ROLL") &&
+    !currentPlayer?.isBankrupt;
 
   const tradeOfferReceiver =
     trade.status === "pending" && trade.offer
@@ -113,6 +121,26 @@ export function GamePanel() {
       >
         🤝 Propose Trade
       </button>
+
+      {/* Declare Bankruptcy */}
+      {bankruptcyAvailable && (
+        <button
+          id="declare-bankruptcy-btn"
+          type="button"
+          onClick={() => {
+            if (
+              window.confirm(
+                `Are you sure you want to declare bankruptcy? ${currentPlayer?.name} will lose all properties and they will be auctioned off.`,
+              )
+            ) {
+              voluntaryBankruptcy();
+            }
+          }}
+          className="w-full rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-2.5 text-sm font-semibold text-red-500 transition hover:bg-red-500/20 hover:border-red-500/70"
+        >
+          🏳 Declare Bankruptcy
+        </button>
+      )}
 
       <LedgerPanel />
 

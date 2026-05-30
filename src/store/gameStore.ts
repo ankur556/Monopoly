@@ -65,6 +65,10 @@ interface GameState {
   winnerId: PlayerId | null;
   /** True when the current roll was doubles — used to gate bonus roll after landing resolution */
   rolledDoubles: boolean;
+  /** Properties queued for sequential bankruptcy auctions */
+  bankruptcyAuctionQueue: string[];
+  /** Order in which players were eliminated (first bankrupt = index 0) */
+  eliminationOrder: PlayerId[];
   logAction: (text: string) => void;
   showAnnouncement: (text: string, variant?: AnnouncementVariant) => void;
   clearAnnouncement: () => void;
@@ -98,6 +102,7 @@ interface GameState {
   rollForJailBreak: () => void;
   // Bankruptcy
   declareBankruptcy: (bankruptPlayerId: PlayerId, creditorId: PlayerId | null) => void;
+  voluntaryBankruptcy: () => void;
   // App navigation
   initLocalGame: (playerNames: string[]) => void;
   returnToMenu: () => void;
@@ -256,7 +261,10 @@ function buildMovementQueue(start: number, roll: number): number[] {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-type InternalStore = GameState & { _resolveLanding: (rolledDoubles: boolean) => void };
+type InternalStore = GameState & {
+  _resolveLanding: (rolledDoubles: boolean) => void;
+  _startNextBankruptcyAuction: (bankruptPlayerId: PlayerId) => void;
+};
 
 export const useGameStore = create<GameState>((set, get) => {
   const store: InternalStore = {
@@ -293,6 +301,8 @@ export const useGameStore = create<GameState>((set, get) => {
     gameOver: false,
     winnerId: null,
     rolledDoubles: false,
+    bankruptcyAuctionQueue: [],
+    eliminationOrder: [],
 
     logAction: (text) => {
       set((s) => ({ actionLog: appendActionLog(s.actionLog, text) }));
@@ -888,17 +898,126 @@ export const useGameStore = create<GameState>((set, get) => {
 
       state.logAction(`${bankruptPlayer.name} declared bankruptcy`);
 
-      // Check for win condition
+      // Track elimination order and check for win condition
+      const newEliminationOrder = [...state.eliminationOrder, bankruptPlayer.id];
       const activePlayers = players.filter((p) => !p.isBankrupt);
       if (activePlayers.length === 1) {
         const winner = activePlayers[0];
         state.logAction(`${winner.name} has won the game!`);
         state.showAnnouncement(`${winner.name} WINS!`, "turn");
-        set({ players, squares, ledger, gameOver: true, winnerId: winner.id });
+        set({ players, squares, ledger, gameOver: true, winnerId: winner.id, eliminationOrder: newEliminationOrder });
         return;
       }
 
-      set({ players, squares, ledger });
+      set({ players, squares, ledger, eliminationOrder: newEliminationOrder });
+    },
+
+    voluntaryBankruptcy: () => {
+      const state = get() as InternalStore;
+      const playerIndex = state.currentPlayerIndex;
+      const player = state.players[playerIndex];
+
+      // Collect all properties owned by this player
+      const ownedPropertyIds = state.squares
+        .filter((sq) => sq.ownerId === player.id)
+        .map((sq) => sq.id);
+
+      // Mark player bankrupt and strip all properties
+      const players = state.players.map((p, i) =>
+        i === playerIndex ? { ...p, isBankrupt: true, balance: 0 } : p,
+      );
+      const squares = state.squares.map((sq) =>
+        sq.ownerId === player.id
+          ? { ...sq, ownerId: null, houses: 0, mortgaged: false }
+          : sq,
+      );
+      const ledger = appendLedger(state.ledger, {
+        turn: state.turnNumber,
+        type: "bankruptcy",
+        fromPlayerId: player.id,
+        toPlayerId: undefined,
+        amount: player.balance,
+        message: `${player.name} declared voluntary bankruptcy`,
+      });
+
+      state.logAction(`${player.name} declared voluntary bankruptcy`);
+      state.showAnnouncement(`${player.name}\nDECLARED BANKRUPTCY`, "default");
+
+      // Track elimination order
+      const newEliminationOrder = [...state.eliminationOrder, player.id];
+
+      // Check win condition
+      const activePlayers = players.filter((p) => !p.isBankrupt);
+      if (activePlayers.length === 1) {
+        const winner = activePlayers[0];
+        state.logAction(`${winner.name} has won the game!`);
+        state.showAnnouncement(`${winner.name} WINS!`, "turn");
+        set({ players, squares, ledger, gameOver: true, winnerId: winner.id, bankruptcyAuctionQueue: [], eliminationOrder: newEliminationOrder });
+        return;
+      }
+
+      if (ownedPropertyIds.length === 0) {
+        // Nothing to auction — just end their turn
+        set({ players, squares, ledger, bankruptcyAuctionQueue: [], eliminationOrder: newEliminationOrder });
+        state.endTurn();
+        return;
+      }
+
+      // Queue all properties for sequential auctions
+      const [first, ...rest] = ownedPropertyIds;
+      // Skip bankrupt players in bidder order
+      const activePlayers2 = players.filter((p) => !p.isBankrupt);
+      const firstBidderIndex = players.findIndex((p) => p.id === activePlayers2[0]?.id);
+      set({
+        players,
+        squares,
+        ledger,
+        bankruptcyAuctionQueue: rest,
+        eliminationOrder: newEliminationOrder,
+        pendingAction: null,
+        auction: {
+          status: "active",
+          propertyId: first,
+          currentBidderIndex: firstBidderIndex >= 0 ? firstBidderIndex : 0,
+          bids: Object.fromEntries(players.map((p) => [p.id, 0])),
+          passedPlayerIds: [player.id], // bankrupt player can't bid
+          winnerId: null,
+          isBankruptcyAuction: true,
+          bankruptPlayerId: player.id,
+        },
+        message: `Auctioning ${player.name}'s properties. ${players[firstBidderIndex >= 0 ? firstBidderIndex : 0].name} bids first on ${state.squares.find((s) => s.id === first)?.name ?? first}.`,
+      });
+    },
+
+    /** Internal: advance to the next property in the bankruptcy auction queue */
+    _startNextBankruptcyAuction: (bankruptPlayerId: PlayerId) => {
+      const state = get() as InternalStore;
+      const queue = state.bankruptcyAuctionQueue;
+
+      if (queue.length === 0) {
+        // All done — end the bankrupt player's turn
+        set({ bankruptcyAuctionQueue: [], auction: { ...INITIAL_AUCTION_STATE } });
+        state.endTurn();
+        return;
+      }
+
+      const [next, ...remaining] = queue;
+      const activePlayers = state.players.filter((p) => !p.isBankrupt);
+      const firstBidderIndex = state.players.findIndex((p) => p.id === activePlayers[0]?.id);
+      set({
+        bankruptcyAuctionQueue: remaining,
+        auction: {
+          status: "active",
+          propertyId: next,
+          currentBidderIndex: firstBidderIndex >= 0 ? firstBidderIndex : 0,
+          bids: Object.fromEntries(state.players.map((p) => [p.id, 0])),
+          passedPlayerIds: [bankruptPlayerId],
+          winnerId: null,
+          isBankruptcyAuction: true,
+          bankruptPlayerId,
+        },
+        message: `Next auction: ${state.squares.find((s) => s.id === next)?.name ?? next}`,
+      });
     },
 
     // ─── Jail Actions ────────────────────────────────────────────────────────
@@ -1095,6 +1214,8 @@ export const useGameStore = create<GameState>((set, get) => {
           bids: Object.fromEntries(state.players.map((p) => [p.id, 0])),
           passedPlayerIds: [],
           winnerId: null,
+          isBankruptcyAuction: false,
+          bankruptPlayerId: null,
         },
         message: `Auction for ${square?.name ?? propertyId}! ${state.players[firstBidderIndex].name} bids first.`,
       });
@@ -1443,26 +1564,30 @@ export const useGameStore = create<GameState>((set, get) => {
         const winner = bidder;
         const winAmount = amount;
         const updatedPlayers = players.map((p) =>
-          p.id === winner.id ? { ...p, balance: p.balance - winAmount } : p,
+          p.id === winner.id ? { ...p, balance: Math.max(0, p.balance - winAmount) } : p,
         );
         const updatedSquares = squares.map((s) =>
           s.id === square.id ? { ...s, ownerId: winner.id } : s,
         );
         state.logAction(`${winner.name} wins auction for ${square.name} at $${winAmount}!`);
         state.showAnnouncement(`SOLD!\n${square.name} → ${winner.name} $${winAmount}`, "default");
+        const newLedger = appendLedger(ledger, {
+          turn: turnNumber, type: "purchase",
+          fromPlayerId: winner.id, amount: winAmount,
+          propertyId: square.id,
+          message: `${winner.name} won auction for ${square.name} at $${winAmount}`,
+        });
         set({
           players: updatedPlayers,
           squares: updatedSquares,
-          ledger: appendLedger(ledger, {
-            turn: turnNumber, type: "purchase",
-            fromPlayerId: winner.id, amount: winAmount,
-            propertyId: square.id,
-            message: `${winner.name} won auction for ${square.name} at $${winAmount}`,
-          }),
-          auction: { ...INITIAL_AUCTION_STATE },
+          ledger: newLedger,
           message: `${winner.name} won ${square.name} at auction for $${winAmount}!`,
-          turnPhase: "POST_ROLL",
         });
+        if (auction.isBankruptcyAuction && auction.bankruptPlayerId) {
+          setTimeout(() => (get() as InternalStore)._startNextBankruptcyAuction(auction.bankruptPlayerId!), 800);
+        } else {
+          set({ auction: { ...INITIAL_AUCTION_STATE }, turnPhase: "POST_ROLL" });
+        }
         return;
       }
 
@@ -1495,48 +1620,58 @@ export const useGameStore = create<GameState>((set, get) => {
 
       state.logAction(`${passer.name} passes on the auction`);
       const newPassed = [...auction.passedPlayerIds, passer.id];
-      const stillActive = players.filter((p) => !newPassed.includes(p.id));
+      const stillActive = players.filter((p) => !newPassed.includes(p.id) && !p.isBankrupt);
 
       if (stillActive.length === 0) {
         state.logAction(`All players passed — ${square.name} goes unsold`);
         state.showAnnouncement("NO SALE!\n" + square.name, "default");
-        set({
-          auction: { ...INITIAL_AUCTION_STATE },
-          message: `All players passed — ${square.name} remains unsold.`,
-          turnPhase: "POST_ROLL",
-        });
+        if (auction.isBankruptcyAuction && auction.bankruptPlayerId) {
+          set({ auction: { ...INITIAL_AUCTION_STATE }, message: `${square.name} went unsold.` });
+          setTimeout(() => (get() as InternalStore)._startNextBankruptcyAuction(auction.bankruptPlayerId!), 600);
+        } else {
+          set({
+            auction: { ...INITIAL_AUCTION_STATE },
+            message: `All players passed — ${square.name} remains unsold.`,
+            turnPhase: "POST_ROLL",
+          });
+        }
         return;
       }
 
       if (stillActive.length === 1) {
         const winner = stillActive[0];
-        const winAmount = Math.max(auction.bids[winner.id] ?? 0, 1);
+        const rawBid = auction.bids[winner.id] ?? 0;
+        const winAmount = Math.min(Math.max(rawBid, 0), winner.balance);
         const updatedPlayers = players.map((p) =>
-          p.id === winner.id ? { ...p, balance: p.balance - winAmount } : p,
+          p.id === winner.id ? { ...p, balance: Math.max(0, p.balance - winAmount) } : p,
         );
         const updatedSquares = squares.map((s) =>
           s.id === square.id ? { ...s, ownerId: winner.id } : s,
         );
         state.logAction(`${winner.name} wins auction for ${square.name} at $${winAmount}!`);
         state.showAnnouncement(`SOLD!\n${square.name} → ${winner.name} $${winAmount}`, "default");
+        const newLedger2 = appendLedger(ledger, {
+          turn: turnNumber, type: "purchase",
+          fromPlayerId: winner.id, amount: winAmount,
+          propertyId: square.id,
+          message: `${winner.name} won auction for ${square.name} at $${winAmount}`,
+        });
         set({
           players: updatedPlayers,
           squares: updatedSquares,
-          ledger: appendLedger(ledger, {
-            turn: turnNumber, type: "purchase",
-            fromPlayerId: winner.id, amount: winAmount,
-            propertyId: square.id,
-            message: `${winner.name} won auction for ${square.name} at $${winAmount}`,
-          }),
-          auction: { ...INITIAL_AUCTION_STATE },
+          ledger: newLedger2,
           message: `${winner.name} wins ${square.name} at auction for $${winAmount}!`,
-          turnPhase: "POST_ROLL",
         });
+        if (auction.isBankruptcyAuction && auction.bankruptPlayerId) {
+          setTimeout(() => (get() as InternalStore)._startNextBankruptcyAuction(auction.bankruptPlayerId!), 800);
+        } else {
+          set({ auction: { ...INITIAL_AUCTION_STATE }, turnPhase: "POST_ROLL" });
+        }
         return;
       }
 
       let nextIdx = (auction.currentBidderIndex + 1) % players.length;
-      while (newPassed.includes(players[nextIdx].id)) {
+      while (newPassed.includes(players[nextIdx].id) || players[nextIdx].isBankrupt) {
         nextIdx = (nextIdx + 1) % players.length;
       }
 
@@ -1597,6 +1732,11 @@ export const useGameStore = create<GameState>((set, get) => {
         isRolling: false,
         movementQueue: [],
         isMoving: false,
+        gameOver: false,
+        winnerId: null,
+        rolledDoubles: false,
+        bankruptcyAuctionQueue: [],
+        eliminationOrder: [],
       });
     },
 
@@ -1626,6 +1766,11 @@ export const useGameStore = create<GameState>((set, get) => {
         isRolling: false,
         movementQueue: [],
         isMoving: false,
+        gameOver: false,
+        winnerId: null,
+        rolledDoubles: false,
+        bankruptcyAuctionQueue: [],
+        eliminationOrder: [],
       });
     },
   };
