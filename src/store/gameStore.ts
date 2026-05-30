@@ -94,6 +94,8 @@ interface GameState {
   payJailFine: () => void;
   useGetOutOfJailCard: () => void;
   rollForJailBreak: () => void;
+  // Bankruptcy
+  declareBankruptcy: (bankruptPlayerId: PlayerId, creditorId: PlayerId | null) => void;
   // App navigation
   initLocalGame: (playerNames: string[]) => void;
   returnToMenu: () => void;
@@ -207,19 +209,6 @@ function validateDraft(
   return null;
 }
 
-function transferMoney(
-  players: Player[],
-  fromId: PlayerId,
-  toId: PlayerId,
-  amount: number,
-): Player[] {
-  const paid = Math.min(amount, players.find((p) => p.id === fromId)!.balance);
-  return players.map((p) => {
-    if (p.id === fromId) return { ...p, balance: p.balance - paid };
-    if (p.id === toId) return { ...p, balance: p.balance + paid };
-    return p;
-  });
-}
 
 function attemptPayment(
   players: Player[],

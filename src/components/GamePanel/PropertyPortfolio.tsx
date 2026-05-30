@@ -1,4 +1,3 @@
-import React from "react";
 import { getBuildableSquares, getGroupMemberIds, getSellableSquares } from "../../lib/building";
 import { RAILROAD_RENTS, COLOR_GROUP_MEMBERS } from "../../data/boardDefinitions";
 import { ownsColorSet } from "../../lib/rent";

@@ -215,6 +215,22 @@
   0%, 100% { box-shadow: 0 0 0 3px rgba(252,165,165,0.9), 0 0 16px 6px rgba(244,63,94,0.6); }
   50%       { box-shadow: 0 0 0 6px rgba(252,165,165,0.4), 0 0 28px 12px rgba(244,63,94,0.3); }
 }
+@keyframes token-halo-p3 {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(110,231,183,0.9), 0 0 16px 6px rgba(16,185,129,0.6); }
+  50%       { box-shadow: 0 0 0 6px rgba(110,231,183,0.4), 0 0 28px 12px rgba(16,185,129,0.3); }
+}
+@keyframes token-halo-p4 {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(253,211,77,0.9), 0 0 16px 6px rgba(217,119,6,0.6); }
+  50%       { box-shadow: 0 0 0 6px rgba(253,211,77,0.4), 0 0 28px 12px rgba(217,119,6,0.3); }
+}
+@keyframes token-halo-p5 {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(196,181,253,0.9), 0 0 16px 6px rgba(124,58,237,0.6); }
+  50%       { box-shadow: 0 0 0 6px rgba(196,181,253,0.4), 0 0 28px 12px rgba(124,58,237,0.3); }
+}
+@keyframes token-halo-p6 {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(249,168,212,0.9), 0 0 16px 6px rgba(219,39,119,0.6); }
+  50%       { box-shadow: 0 0 0 6px rgba(249,168,212,0.4), 0 0 28px 12px rgba(219,39,119,0.3); }
+}
 
 /* Tile glow when a player stands on it */
 @keyframes player-tile-glow-p1 {
@@ -224,6 +240,22 @@
 @keyframes player-tile-glow-p2 {
   0%, 100% { box-shadow: inset 0 0 0 3px rgba(244,63,94,0.9), inset 0 0 12px rgba(244,63,94,0.4); }
   50%       { box-shadow: inset 0 0 0 3px rgba(244,63,94,0.6), inset 0 0 20px rgba(244,63,94,0.25); }
+}
+@keyframes player-tile-glow-p3 {
+  0%, 100% { box-shadow: inset 0 0 0 3px rgba(16,185,129,0.9), inset 0 0 12px rgba(16,185,129,0.4); }
+  50%       { box-shadow: inset 0 0 0 3px rgba(16,185,129,0.6), inset 0 0 20px rgba(16,185,129,0.25); }
+}
+@keyframes player-tile-glow-p4 {
+  0%, 100% { box-shadow: inset 0 0 0 3px rgba(217,119,6,0.9), inset 0 0 12px rgba(217,119,6,0.4); }
+  50%       { box-shadow: inset 0 0 0 3px rgba(217,119,6,0.6), inset 0 0 20px rgba(217,119,6,0.25); }
+}
+@keyframes player-tile-glow-p5 {
+  0%, 100% { box-shadow: inset 0 0 0 3px rgba(124,58,237,0.9), inset 0 0 12px rgba(124,58,237,0.4); }
+  50%       { box-shadow: inset 0 0 0 3px rgba(124,58,237,0.6), inset 0 0 20px rgba(124,58,237,0.25); }
+}
+@keyframes player-tile-glow-p6 {
+  0%, 100% { box-shadow: inset 0 0 0 3px rgba(219,39,119,0.9), inset 0 0 12px rgba(219,39,119,0.4); }
+  50%       { box-shadow: inset 0 0 0 3px rgba(219,39,119,0.6), inset 0 0 20px rgba(219,39,119,0.25); }
 }
 
 @theme inline {
@@ -239,8 +271,16 @@
   --animate-turn-badge-pulse: turn-badge-pulse 2s ease-in-out infinite;
   --animate-token-halo-p1: token-halo-p1 1.4s ease-in-out infinite;
   --animate-token-halo-p2: token-halo-p2 1.4s ease-in-out infinite;
+  --animate-token-halo-p3: token-halo-p3 1.4s ease-in-out infinite;
+  --animate-token-halo-p4: token-halo-p4 1.4s ease-in-out infinite;
+  --animate-token-halo-p5: token-halo-p5 1.4s ease-in-out infinite;
+  --animate-token-halo-p6: token-halo-p6 1.4s ease-in-out infinite;
   --animate-player-tile-glow-p1: player-tile-glow-p1 1.4s ease-in-out infinite;
   --animate-player-tile-glow-p2: player-tile-glow-p2 1.4s ease-in-out infinite;
+  --animate-player-tile-glow-p3: player-tile-glow-p3 1.4s ease-in-out infinite;
+  --animate-player-tile-glow-p4: player-tile-glow-p4 1.4s ease-in-out infinite;
+  --animate-player-tile-glow-p5: player-tile-glow-p5 1.4s ease-in-out infinite;
+  --animate-player-tile-glow-p6: player-tile-glow-p6 1.4s ease-in-out infinite;
 }
 
 body {

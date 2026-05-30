@@ -2,19 +2,34 @@ import { useEffect, useRef, useState } from "react";
 import { POSITION_TO_CELL } from "../../data/boardLayout";
 import { useGameStore } from "../../store/gameStore";
 
+/** Token icon for each player slot — matches StartMenu icons */
 const TOKEN_ICONS: Record<string, string> = {
   p1: "🎩",
   p2: "🚗",
+  p3: "🏠",
+  p4: "🐶",
+  p5: "⛵",
+  p6: "🎸",
 };
 
+/** Gradient body colour for each player */
 const TOKEN_GRADIENT: Record<string, string> = {
-  p1: "linear-gradient(135deg, #2563eb, #1d4ed8)",
-  p2: "linear-gradient(135deg, #dc2626, #b91c1c)",
+  p1: "linear-gradient(135deg, #2563eb, #1d4ed8)",   // blue
+  p2: "linear-gradient(135deg, #dc2626, #b91c1c)",   // red
+  p3: "linear-gradient(135deg, #059669, #047857)",   // emerald
+  p4: "linear-gradient(135deg, #d97706, #b45309)",   // amber
+  p5: "linear-gradient(135deg, #7c3aed, #6d28d9)",   // purple
+  p6: "linear-gradient(135deg, #db2777, #be185d)",   // pink
 };
 
+/** Label background — same hue, darker shade */
 const TOKEN_LABEL_BG: Record<string, string> = {
   p1: "#1d4ed8",
   p2: "#b91c1c",
+  p3: "#047857",
+  p4: "#b45309",
+  p5: "#6d28d9",
+  p6: "#be185d",
 };
 
 const GRID_SIZE = 11;
@@ -35,6 +50,7 @@ interface TokenOverlayProps {
  * Accounts for the 1px gap between grid cells.
  * Tokens smoothly slide between squares via CSS position transition.
  * The current player's token gets a pulsing halo ring + name label.
+ * Supports up to 6 players (p1–p6).
  */
 export function TokenOverlay({ boardRef }: TokenOverlayProps) {
   const players = useGameStore((s) => s.players);
@@ -45,7 +61,6 @@ export function TokenOverlay({ boardRef }: TokenOverlayProps) {
     const measure = () => {
       const el = boardRef.current;
       if (!el) return;
-      // offsetWidth/Height give CSS pixel size without fractional scaling
       setDims({ w: el.offsetWidth, h: el.offsetHeight });
     };
 
@@ -57,7 +72,6 @@ export function TokenOverlay({ boardRef }: TokenOverlayProps) {
 
   if (!dims || dims.w === 0) return null;
 
-  // Cell size accounting for 10 gaps of GAP_PX each in an 11-column grid
   const totalGapW = GAP_PX * (GRID_SIZE - 1);
   const totalGapH = GAP_PX * (GRID_SIZE - 1);
   const cellW = (dims.w - totalGapW) / GRID_SIZE;
@@ -75,13 +89,12 @@ export function TokenOverlay({ boardRef }: TokenOverlayProps) {
 
         const isCurrentPlayer = idx === currentPlayerIndex;
 
-        // Handle same-square stacking
+        // Stack tokens that share the same square
         const siblings = players.filter((p) => p.position === player.position);
         const myIndex = siblings.findIndex((p) => p.id === player.id);
         const total = siblings.length;
         const offsetX = total > 1 ? (myIndex - (total - 1) / 2) * (TOKEN_SIZE + 4) : 0;
 
-        // Cell top-left accounts for gaps: each column after 0 adds an extra GAP_PX
         const cellLeft = cell.col * (cellW + GAP_PX);
         const cellTop = cell.row * (cellH + GAP_PX);
         const centerX = cellLeft + cellW / 2;
@@ -136,8 +149,8 @@ function OverlayToken({
   const icon = TOKEN_ICONS[playerId] ?? "🎲";
   const gradient = TOKEN_GRADIENT[playerId] ?? "linear-gradient(135deg,#6b7280,#374151)";
   const labelBg = TOKEN_LABEL_BG[playerId] ?? "#374151";
-  const haloClass =
-    playerId === "p1" ? "animate-token-halo-p1" : "animate-token-halo-p2";
+  // animate-token-halo-p1 … animate-token-halo-p6 are defined in index.css
+  const haloClass = `animate-token-halo-${playerId}`;
 
   return (
     <div
@@ -146,7 +159,6 @@ function OverlayToken({
         left,
         top,
         width: TOKEN_SIZE,
-        // Give extra height for the label tag below
         height: TOKEN_SIZE + 14,
         transition:
           "left 0.28s cubic-bezier(0.34,1.56,0.64,1), top 0.28s cubic-bezier(0.34,1.56,0.64,1)",
@@ -171,7 +183,7 @@ function OverlayToken({
         }}
       />
 
-      {/* Halo ring — only for current player, pulsing */}
+      {/* Halo ring — only for current player */}
       {isCurrentPlayer && (
         <div
           className={haloClass}
@@ -198,18 +210,20 @@ function OverlayToken({
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          fontSize: TOKEN_SIZE * 0.50,
+          fontSize: TOKEN_SIZE * 0.5,
           lineHeight: 1,
           userSelect: "none",
           flexShrink: 0,
           animation: "token-land 0.42s cubic-bezier(0.34,1.56,0.64,1) both",
-          border: isCurrentPlayer ? "2px solid rgba(255,255,255,0.9)" : "1.5px solid rgba(255,255,255,0.6)",
+          border: isCurrentPlayer
+            ? "2px solid rgba(255,255,255,0.9)"
+            : "1.5px solid rgba(255,255,255,0.6)",
         }}
       >
         {icon}
       </div>
 
-      {/* Name label — always visible */}
+      {/* Name label */}
       <div
         style={{
           background: labelBg,

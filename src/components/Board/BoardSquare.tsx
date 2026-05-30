@@ -1,17 +1,58 @@
-import { COLOR_BAND, SPECIAL_SQUARE_STYLE } from "../../data/squareStyles";
+import { SPECIAL_SQUARE_STYLE } from "../../data/squareStyles";
 import { useGameStore } from "../../store/gameStore";
 import type { BoardSquare as BoardSquareType, Player } from "../../types/game";
 import { HouseIndicators } from "./HouseIndicators";
 
-const OWNER_RING: Record<string, string> = {
-  p1: "ring-2 ring-blue-400/80",
-  p2: "ring-2 ring-red-400/80",
+// ── 6-player colour palette (matches TokenOverlay & StartMenu) ─────────────
+const PLAYER_DOT_BG: Record<string, string> = {
+  p1: "#3b82f6", // blue-500
+  p2: "#ef4444", // red-500
+  p3: "#10b981", // emerald-500
+  p4: "#f59e0b", // amber-500
+  p5: "#8b5cf6", // violet-500
+  p6: "#ec4899", // pink-500
 };
 
-/** Tile glow animation class when a player is standing on this square */
+const PLAYER_TILE_BG: Record<string, string> = {
+  p1: "rgba(219,234,254,0.95)", // blue-100
+  p2: "rgba(254,226,226,0.95)", // red-100
+  p3: "rgba(209,250,229,0.95)", // emerald-100
+  p4: "rgba(254,243,199,0.95)", // amber-100
+  p5: "rgba(237,233,254,0.95)", // violet-100
+  p6: "rgba(252,231,243,0.95)", // pink-100
+};
+
+const PLAYER_OWNER_RING: Record<string, string> = {
+  p1: "ring-2 ring-blue-400/80",
+  p2: "ring-2 ring-red-400/80",
+  p3: "ring-2 ring-emerald-400/80",
+  p4: "ring-2 ring-amber-400/80",
+  p5: "ring-2 ring-violet-400/80",
+  p6: "ring-2 ring-pink-400/80",
+};
+
+// animate-player-tile-glow-p1 … p6 are defined in index.css
 const PLAYER_TILE_GLOW: Record<string, string> = {
   p1: "animate-player-tile-glow-p1",
   p2: "animate-player-tile-glow-p2",
+  p3: "animate-player-tile-glow-p3",
+  p4: "animate-player-tile-glow-p4",
+  p5: "animate-player-tile-glow-p5",
+  p6: "animate-player-tile-glow-p6",
+};
+
+// Hex colours for property color bands — used as inline styles so they're always reliable
+const COLOR_BAND_HEX: Record<string, string> = {
+  brown: "#8B4513",
+  "light-blue": "#87CEEB",
+  pink: "#FF69B4",
+  orange: "#FF8C00",
+  red: "#DC143C",
+  yellow: "#FFD700",
+  green: "#228B22",
+  "dark-blue": "#00008B",
+  railroad: "#2F2F2F",
+  utility: "#C0C0C0",
 };
 
 /** Which players are currently on this square */
@@ -70,11 +111,6 @@ export function BoardSquare({
     square.type === "railroad" ||
     square.type === "utility";
 
-  const colorBand =
-    square.colorGroup && COLOR_BAND[square.colorGroup]
-      ? COLOR_BAND[square.colorGroup]
-      : null;
-
   const special =
     square.type !== "property" &&
     square.type !== "railroad" &&
@@ -82,14 +118,23 @@ export function BoardSquare({
       ? SPECIAL_SQUARE_STYLE[square.type]
       : null;
 
-  const ownerRing = square.ownerId ? OWNER_RING[square.ownerId] : "";
+  const colorBandHex = square.colorGroup
+    ? (COLOR_BAND_HEX[square.colorGroup] ?? null)
+    : null;
+
+  // Owner ring & tile bg
+  const ownerRing = square.ownerId ? (PLAYER_OWNER_RING[square.ownerId] ?? "") : "";
   const playersHere = getPlayersOnSquare(players, square.boardIndex);
   const hasPlayers = playersHere.length > 0;
 
-  // Pick the first player's glow (p1 wins if both share the square)
-  const tileGlowClass = hasPlayers
-    ? (PLAYER_TILE_GLOW[playersHere[0].id] ?? "")
+  // Use the first player here for glow/bg (lower index = higher priority)
+  const primaryPlayer = playersHere[0];
+  const tileGlowClass = primaryPlayer
+    ? (PLAYER_TILE_GLOW[primaryPlayer.id] ?? "")
     : "";
+  const tileBg = primaryPlayer
+    ? (PLAYER_TILE_BG[primaryPlayer.id] ?? "#f8f5f0")
+    : "#f8f5f0";
 
   return (
     <button
@@ -106,21 +151,24 @@ export function BoardSquare({
         ${isHighlighted ? "animate-square-pulse z-10 ring-2 ring-amber-400 ring-offset-1" : ""}
         ${tileGlowClass}
       `}
-      style={{
-        backgroundColor: hasPlayers
-          ? playersHere[0].id === "p1"
-            ? "rgba(219,234,254,0.95)"   // blue-100 tint
-            : "rgba(254,226,226,0.95)"   // red-100 tint
-          : "#f8f5f0",
-      }}
+      style={{ backgroundColor: tileBg }}
     >
-      {/* Color band for properties */}
-      {colorBand && (
-        <div className={`h-2 w-full shrink-0 sm:h-3 ${colorBand}`} />
+      {/* ── Color band for properties ──────────────────────────────────────── */}
+      {colorBandHex && (
+        <div
+          className="w-full shrink-0"
+          style={{
+            height: "14%",
+            minHeight: 5,
+            maxHeight: 12,
+            backgroundColor: colorBandHex,
+            boxShadow: `0 1px 3px ${colorBandHex}88`,
+          }}
+        />
       )}
 
-      {/* Special squares */}
-      {special && !colorBand && (
+      {/* Special squares (GO, Chance, etc.) */}
+      {special && !colorBandHex && (
         <div
           className={`flex flex-1 flex-col items-center justify-center gap-0.5 px-0.5 ${special.bg} ${special.text}`}
         >
@@ -138,7 +186,7 @@ export function BoardSquare({
         </div>
       )}
 
-      {/* Property / railroad / utility */}
+      {/* Property / railroad / utility body */}
       {!special && (
         <div className="flex flex-1 flex-col items-center justify-between p-0.5">
           <TileTypeIcon square={square} />
@@ -162,13 +210,26 @@ export function BoardSquare({
       {/* Building indicators */}
       <HouseIndicators houses={square.houses} />
 
-      {/* Player presence indicator dots — always visible even on tiny tiles */}
+      {/* Owner color strip at bottom of tile */}
+      {square.ownerId && (
+        <div
+          className="absolute bottom-0 left-0 right-0"
+          style={{
+            height: 3,
+            backgroundColor: PLAYER_DOT_BG[square.ownerId] ?? "#6b7280",
+            opacity: 0.85,
+          }}
+        />
+      )}
+
+      {/* Player presence dots — top-right, always visible */}
       {hasPlayers && (
-        <div className="absolute right-0.5 top-0.5 flex gap-px">
+        <div className="absolute right-0.5 top-0.5 flex flex-col gap-px">
           {playersHere.map((p) => (
             <span
               key={p.id}
-              className={`block h-1.5 w-1.5 rounded-full ${p.id === "p1" ? "bg-blue-500" : "bg-red-500"}`}
+              className="block h-1.5 w-1.5 rounded-full shadow-sm"
+              style={{ backgroundColor: PLAYER_DOT_BG[p.id] ?? "#6b7280" }}
               title={p.name}
             />
           ))}
