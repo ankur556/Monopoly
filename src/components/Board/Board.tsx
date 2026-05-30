@@ -59,8 +59,8 @@ export function Board() {
           ref={gridRef}
           className="grid h-full w-full gap-px bg-zinc-900/80"
           style={{
-            gridTemplateColumns: `repeat(${GRID_SIZE}, minmax(0, 1fr))`,
-            gridTemplateRows: `repeat(${GRID_SIZE}, minmax(0, 1fr))`,
+            gridTemplateColumns: `1fr 1.45fr 1.45fr 1.45fr 1.45fr 1.45fr 1.45fr 1.45fr 1.45fr 1.45fr 1fr`,
+            gridTemplateRows:    `1fr 1.45fr 1.45fr 1.45fr 1.45fr 1.45fr 1.45fr 1.45fr 1.45fr 1.45fr 1fr`,
           }}
         >
           {cells}

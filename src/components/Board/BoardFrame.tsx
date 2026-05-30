@@ -9,7 +9,7 @@ interface BoardFrameProps {
 export function BoardFrame({ children }: BoardFrameProps) {
   return (
     <div className="flex w-full justify-center px-1 py-3 sm:px-2 sm:py-4">
-      <GlassPanel className="w-full max-w-[min(100vw-1rem,58rem)] p-1.5 sm:p-2">
+      <GlassPanel className="w-full max-w-[min(100vw-1rem,72rem)] p-1.5 sm:p-2">
         {children}
       </GlassPanel>
     </div>

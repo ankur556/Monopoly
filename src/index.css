@@ -3,18 +3,26 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 :root {
-  --background: #f4f1ea;
-  --foreground: #171717;
-  --bg-gradient-from: #e8e4dc;
-  --bg-gradient-via: #d4e8d9;
-  --bg-gradient-to: #c5ddd0;
-  --glass-bg: rgba(255, 255, 255, 0.55);
-  --glass-border: rgba(255, 255, 255, 0.65);
+  --background: #f0ece2;
+  --foreground: #0f172a;
+  --bg-gradient-from: #e2ddd5;
+  --bg-gradient-via: #cce3d6;
+  --bg-gradient-to: #b8d4c8;
+  /* Glass panels — more opaque so dark text is always readable */
+  --glass-bg: rgba(255, 253, 247, 0.88);
+  --glass-border: rgba(0, 0, 0, 0.12);
+  /* Text inside glass panels */
+  --glass-text: #0f172a;
+  --glass-text-muted: rgba(15, 23, 42, 0.55);
+  --glass-text-subtle: rgba(15, 23, 42, 0.35);
   --accent: #047857;
   --board-felt: #065f46;
   --die-face-bg: #ffffff;
   --die-face-border: #a1a1aa;
   --die-value-color: #171717;
+  /* Board tile colours */
+  --tile-bg: #f8f5f0;
+  --tile-text: #18181b;
 }
 
 .dark {
@@ -25,11 +33,18 @@
   --bg-gradient-to: #022c22;
   --glass-bg: rgba(15, 23, 42, 0.55);
   --glass-border: rgba(255, 255, 255, 0.12);
+  /* Text inside glass panels */
+  --glass-text: #f1f5f9;
+  --glass-text-muted: rgba(241, 245, 249, 0.6);
+  --glass-text-subtle: rgba(241, 245, 249, 0.35);
   --accent: #34d399;
   --board-felt: #022c22;
   --die-face-bg: #f4f4f5;
   --die-face-border: #d4d4d8;
   --die-value-color: #0a0a0a;
+  /* Board tile colours */
+  --tile-bg: #3f3f46;
+  --tile-text: #f4f4f5;
 }
 
 .die-face {
@@ -336,4 +351,78 @@ body {
 
 .deed-card-rent-row:last-child {
   border-bottom: none;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Light-mode glass panel text overrides
+   Targets [data-glass] panels (GlassPanel component) only.
+   Dark mode: no change — all the text-white Tailwind utilities work fine on
+   the dark semi-transparent glass.
+   Light mode: panels are near-opaque cream, so we force text to near-black.
+─────────────────────────────────────────────────────────────────────────────── */
+:root:not(.dark) [data-glass] {
+  /* Reset any white text utilities to use the adaptive glass-text token */
+  --panel-text: var(--glass-text);
+  --panel-muted: var(--glass-text-muted);
+  --panel-subtle: var(--glass-text-subtle);
+}
+
+/* Override text-white & opacity variants inside glass panels (light mode) */
+:root:not(.dark) [data-glass] .text-white,
+:root:not(.dark) [data-glass] [class*="text-white\/"] {
+  color: var(--glass-text) !important;
+}
+
+:root:not(.dark) [data-glass] .opacity-60,
+:root:not(.dark) [data-glass] .opacity-70,
+:root:not(.dark) [data-glass] .opacity-75,
+:root:not(.dark) [data-glass] .opacity-80,
+:root:not(.dark) [data-glass] .opacity-90 {
+  /* Don't inherit opacity for text, just use muted color directly */
+  opacity: 1 !important;
+  color: var(--glass-text-muted) !important;
+}
+
+:root:not(.dark) [data-glass] .opacity-30,
+:root:not(.dark) [data-glass] .opacity-40,
+:root:not(.dark) [data-glass] .opacity-50 {
+  opacity: 1 !important;
+  color: var(--glass-text-subtle) !important;
+}
+
+/* Coloured accent text should keep their colour — restore them */
+:root:not(.dark) [data-glass] .text-emerald-400 { color: #059669 !important; }
+:root:not(.dark) [data-glass] .text-emerald-300 { color: #047857 !important; }
+:root:not(.dark) [data-glass] .text-amber-400   { color: #d97706 !important; }
+:root:not(.dark) [data-glass] .text-amber-300   { color: #b45309 !important; }
+:root:not(.dark) [data-glass] .text-blue-400    { color: #2563eb !important; }
+:root:not(.dark) [data-glass] .text-blue-300    { color: #1d4ed8 !important; }
+:root:not(.dark) [data-glass] .text-red-400     { color: #dc2626 !important; }
+:root:not(.dark) [data-glass] .text-violet-400  { color: #7c3aed !important; }
+:root:not(.dark) [data-glass] .text-purple-400  { color: #7c3aed !important; }
+:root:not(.dark) [data-glass] .text-pink-400    { color: #db2777 !important; }
+:root:not(.dark) [data-glass] .text-orange-400  { color: #ea580c !important; }
+:root:not(.dark) [data-glass] .text-zinc-400    { color: #52525b !important; }
+:root:not(.dark) [data-glass] .text-zinc-500    { color: #3f3f46 !important; }
+:root:not(.dark) [data-glass] .text-zinc-600    { color: #27272a !important; }
+
+/* White border dividers in ledger — give them a dark tint in light mode */
+:root:not(.dark) [data-glass] .border-white\/10 {
+  border-color: rgba(0,0,0,0.08) !important;
+}
+:root:not(.dark) [data-glass] .border-white\/20 {
+  border-color: rgba(0,0,0,0.12) !important;
+}
+
+/* Background utilities inside glass panels — keep coloured badges legible */
+:root:not(.dark) [data-glass] .bg-white\/5  { background-color: rgba(0,0,0,0.04) !important; }
+:root:not(.dark) [data-glass] .bg-white\/10 { background-color: rgba(0,0,0,0.06) !important; }
+:root:not(.dark) [data-glass] .bg-white\/20 { background-color: rgba(0,0,0,0.09) !important; }
+
+/* Hover variants */
+:root:not(.dark) [data-glass] .hover\:bg-white\/20:hover { background-color: rgba(0,0,0,0.1) !important; }
+
+/* The modal dark backdrop should still show white text on its own */
+:root:not(.dark) .bg-black\/70 {
+  background-color: rgba(0,0,0,0.72) !important;
 }

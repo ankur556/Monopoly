@@ -63,6 +63,8 @@ interface GameState {
   gameOver: boolean;
   /** Winner player id when game is concluded */
   winnerId: PlayerId | null;
+  /** True when the current roll was doubles — used to gate bonus roll after landing resolution */
+  rolledDoubles: boolean;
   logAction: (text: string) => void;
   showAnnouncement: (text: string, variant?: AnnouncementVariant) => void;
   clearAnnouncement: () => void;
@@ -290,6 +292,7 @@ export const useGameStore = create<GameState>((set, get) => {
     isMoving: false,
     gameOver: false,
     winnerId: null,
+    rolledDoubles: false,
 
     logAction: (text) => {
       set((s) => ({ actionLog: appendActionLog(s.actionLog, text) }));
@@ -327,7 +330,9 @@ export const useGameStore = create<GameState>((set, get) => {
             message: `${player.name} collected $${effect.amount} (card)`,
           });
           state.logAction(`${player.name} collected $${effect.amount} from card`);
-          set({ players, ledger, turnPhase: "POST_ROLL" });
+          const collectPhase = state.rolledDoubles ? "PRE_ROLL" : "POST_ROLL";
+          if (state.rolledDoubles) state.showAnnouncement("DOUBLES!\nRoll again!", "default");
+          set({ players, ledger, turnPhase: collectPhase });
           break;
         }
         case "pay": {
@@ -345,11 +350,14 @@ export const useGameStore = create<GameState>((set, get) => {
             state.showAnnouncement(`${player.name} is BANKRUPT!`, "default");
             (get() as InternalStore).declareBankruptcy(player.id, null);
           }
-          set({ players, squares, ledger, turnPhase: "POST_ROLL" });
+          const payCardPhase = state.rolledDoubles && !payRes.bankrupt ? "PRE_ROLL" : "POST_ROLL";
+          if (state.rolledDoubles && !payRes.bankrupt) state.showAnnouncement("DOUBLES!\nRoll again!", "default");
+          set({ players, squares, ledger, turnPhase: payCardPhase });
           break;
         }
         case "pay-each-player": {
           const opponents = players.filter((_p, i) => i !== playerIndex && !_p.isBankrupt);
+          let payEachBankrupt = false;
           for (const opp of opponents) {
             const res = attemptPayment(players, squares, player.id, opp.id, effect.amount);
             players = res.players;
@@ -364,10 +372,13 @@ export const useGameStore = create<GameState>((set, get) => {
               state.logAction(`${player.name} declared bankrupt while paying others (card)`);
               state.showAnnouncement(`${player.name} is BANKRUPT!`, "default");
               (get() as InternalStore).declareBankruptcy(player.id, opp.id);
+              payEachBankrupt = true;
               break;
             }
           }
-          set({ players, squares, ledger, turnPhase: "POST_ROLL" });
+          const payEachPhase = state.rolledDoubles && !payEachBankrupt ? "PRE_ROLL" : "POST_ROLL";
+          if (state.rolledDoubles && !payEachBankrupt) state.showAnnouncement("DOUBLES!\nRoll again!", "default");
+          set({ players, squares, ledger, turnPhase: payEachPhase });
           break;
         }
         case "collect-from-each-player": {
@@ -395,7 +406,9 @@ export const useGameStore = create<GameState>((set, get) => {
             message: `${player.name} collected $${totalCollect} total from other players (card)`,
           });
           state.logAction(`${player.name} collected $${totalCollect} total from other players (card)`);
-          set({ players, squares, ledger, turnPhase: "POST_ROLL" });
+          const collectEachPhase = state.rolledDoubles ? "PRE_ROLL" : "POST_ROLL";
+          if (state.rolledDoubles) state.showAnnouncement("DOUBLES!\nRoll again!", "default");
+          set({ players, squares, ledger, turnPhase: collectEachPhase });
           break;
         }
         case "repairs": {
@@ -418,7 +431,9 @@ export const useGameStore = create<GameState>((set, get) => {
             state.showAnnouncement(`${player.name} is BANKRUPT!`, "default");
             (get() as InternalStore).declareBankruptcy(player.id, null);
           }
-          set({ players, squares, ledger, turnPhase: "POST_ROLL" });
+          const repairsPhase = state.rolledDoubles && !res.bankrupt ? "PRE_ROLL" : "POST_ROLL";
+          if (state.rolledDoubles && !res.bankrupt) state.showAnnouncement("DOUBLES!\nRoll again!", "default");
+          set({ players, squares, ledger, turnPhase: repairsPhase });
           break;
         }
         case "move": {
@@ -441,8 +456,7 @@ export const useGameStore = create<GameState>((set, get) => {
             message: `${player.name} moved to square ${dest} (card)`,
           });
           state.logAction(`${player.name} moved to square ${dest} via card`);
-          // persist move, then immediately process landing
-          set({ players, squares, ledger, isRolling: false });
+          set({ players, squares, ledger, isRolling: false, rolledDoubles: false });
           setTimeout(() => (get() as InternalStore).processLanding(player.id, dest, false), 20);
           break;
         }
@@ -452,19 +466,18 @@ export const useGameStore = create<GameState>((set, get) => {
             i === playerIndex ? { ...p, position: newPos } : p,
           );
           state.logAction(`${player.name} moved back ${effect.spaces} spaces (card)`);
-          set({ players, squares, ledger, isRolling: false });
+          set({ players, squares, ledger, isRolling: false, rolledDoubles: false });
           setTimeout(() => (get() as InternalStore).processLanding(player.id, newPos, false), 20);
           break;
         }
         case "jail": {
-          // Jail is instant — reset player and end turn immediately
           players = players.map((p, i) =>
             i === playerIndex
               ? { ...p, position: 10, inJail: true, jailTurns: 0, doublesCount: 0 }
               : p,
           );
           state.logAction(`${player.name} sent to Jail (card)`);
-          set({ players, ledger });
+          set({ players, ledger, rolledDoubles: false });
           state.endTurn();
           break;
         }
@@ -475,13 +488,18 @@ export const useGameStore = create<GameState>((set, get) => {
               : p,
           );
           state.logAction(`${player.name} received a Get Out of Jail Free card`);
-          set({ players, ledger, turnPhase: "POST_ROLL" });
+          const goojfPhase = state.rolledDoubles ? "PRE_ROLL" : "POST_ROLL";
+          if (state.rolledDoubles) state.showAnnouncement("DOUBLES!\nRoll again!", "default");
+          set({ players, ledger, turnPhase: goojfPhase });
           break;
         }
         case "none":
-        default:
-          set({ turnPhase: "POST_ROLL" });
+        default: {
+          const nonePhase = state.rolledDoubles ? "PRE_ROLL" : "POST_ROLL";
+          if (state.rolledDoubles) state.showAnnouncement("DOUBLES!\nRoll again!", "default");
+          set({ turnPhase: nonePhase });
           break;
+        }
       }
     },
 
@@ -509,6 +527,7 @@ export const useGameStore = create<GameState>((set, get) => {
         lastDie2: null,
         pendingAction: null,
         isRolling: false,
+        rolledDoubles: false,
       });
 
       const jailMsg = nextPlayer.inJail
@@ -578,6 +597,7 @@ export const useGameStore = create<GameState>((set, get) => {
         lastDie2: die2,
         movementQueue: queue,
         isMoving: false,
+        rolledDoubles: isDoubles,
         players: state.players.map((p, i) =>
           i === state.currentPlayerIndex
             ? { ...p, doublesCount: newDoublesCount }
@@ -723,16 +743,17 @@ export const useGameStore = create<GameState>((set, get) => {
         if (taxRes.bankrupt) {
           state.logAction(`${player.name} declared bankrupt while paying taxes`);
           state.showAnnouncement(`${player.name} is BANKRUPT!`, "default");
-          // finalize bankruptcy
           (get() as InternalStore).declareBankruptcy(player.id, null);
         }
+        const afterTaxPhase = rolledDoubles ? "PRE_ROLL" : "POST_ROLL";
+        if (rolledDoubles && !taxRes.bankrupt) state.showAnnouncement("DOUBLES!\nRoll again!", "default");
         set({
           players,
           squares,
           ledger,
           isRolling: false,
           message: `${message}, paid $${taxRes.paid} (${square.name}).`,
-          turnPhase: "POST_ROLL",
+          turnPhase: afterTaxPhase,
         });
         return;
       }
@@ -774,13 +795,15 @@ export const useGameStore = create<GameState>((set, get) => {
           state.showAnnouncement(`${player.name} is BANKRUPT!`, "default");
           (get() as InternalStore).declareBankruptcy(player.id, owner.id);
         }
+        const afterRentPhase = rolledDoubles ? "PRE_ROLL" : "POST_ROLL";
+        if (rolledDoubles && !payRes.bankrupt) state.showAnnouncement("DOUBLES!\nRoll again!", "default");
         set({
           players,
           squares,
           ledger,
           isRolling: false,
           message: `${message}, paid $${payRes.paid} rent to ${owner.name} for ${square.name}.`,
-          turnPhase: "POST_ROLL",
+          turnPhase: afterRentPhase,
         });
         return;
       }
@@ -1036,12 +1059,15 @@ export const useGameStore = create<GameState>((set, get) => {
       state.logAction(`${player.name} bought ${square.name} for $${square.price}`);
       state.showAnnouncement(`PURCHASED!\n${square.name}`, "default");
 
+      const afterBuyPhase = state.rolledDoubles ? "PRE_ROLL" : "POST_ROLL";
+      if (state.rolledDoubles) setTimeout(() => state.showAnnouncement("DOUBLES!\nRoll again!", "default"), 1200);
+
       set({
         players,
         squares,
         ledger,
         pendingAction: null,
-        turnPhase: "POST_ROLL",
+        turnPhase: afterBuyPhase,
         message: `${player.name} bought ${square.name} for $${square.price}.`,
       });
     },
