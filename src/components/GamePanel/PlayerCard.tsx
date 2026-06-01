@@ -41,7 +41,9 @@ export function PlayerCard({ player, isCurrent }: PlayerCardProps) {
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
-            <p className="truncate font-semibold">{player.name}</p>
+            <p className="truncate font-semibold">
+              {player.name} {player.isBot && <span className="ml-1 text-xs">🤖</span>}
+            </p>
             {isCurrent && (
               <span className="shrink-0 rounded-full bg-emerald-500/20 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wider text-emerald-400">
                 ▶ Turn

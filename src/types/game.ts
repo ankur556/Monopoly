@@ -53,6 +53,8 @@ export interface Player {
   getOutOfJailFreeCards: number;
   /** Whether the player has been declared bankrupt and is out of the game */
   isBankrupt?: boolean;
+  /** Whether this player is controlled by the RL bot */
+  isBot?: boolean;
 }
 
 export interface RentSchedule {

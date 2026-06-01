@@ -6,8 +6,11 @@ import { LedgerPanel } from "./LedgerPanel";
 import { PlayerCard } from "./PlayerCard";
 import { PropertyActions } from "./PropertyActions";
 import { PropertyPortfolio } from "./PropertyPortfolio";
+import { useBotTurn } from "../../hooks/useBotTurn";
 
 export function GamePanel() {
+  useBotTurn();
+  
   const players = useGameStore((s) => s.players);
   const currentPlayerIndex = useGameStore((s) => s.currentPlayerIndex);
   const message = useGameStore((s) => s.message);

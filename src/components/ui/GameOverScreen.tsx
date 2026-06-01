@@ -151,7 +151,7 @@ export function GameOverScreen() {
         <div className="flex w-full flex-col gap-3 sm:flex-row">
           <button
             type="button"
-            onClick={() => initLocalGame(players.map((p) => p.name))}
+            onClick={() => initLocalGame(players.map((p) => ({ name: p.name, isBot: p.isBot ?? false })))}
             className="flex-1 rounded-xl bg-emerald-500 px-6 py-3 text-sm font-bold text-white shadow-lg transition hover:bg-emerald-400 active:scale-95"
           >
             🔄 Rematch

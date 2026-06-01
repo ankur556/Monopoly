@@ -104,7 +104,7 @@ interface GameState {
   declareBankruptcy: (bankruptPlayerId: PlayerId, creditorId: PlayerId | null) => void;
   voluntaryBankruptcy: () => void;
   // App navigation
-  initLocalGame: (playerNames: string[]) => void;
+  initLocalGame: (playersConfig: { name: string, isBot: boolean }[]) => void;
   returnToMenu: () => void;
 }
 
@@ -1687,17 +1687,18 @@ export const useGameStore = create<GameState>((set, get) => {
 
     // ─── App Navigation ──────────────────────────────────────────────────────
 
-    initLocalGame: (playerNames: string[]) => {
-      const clamped = playerNames.slice(0, 6);
-      const newPlayers: Player[] = clamped.map((name, i) => ({
+    initLocalGame: (playersConfig: { name: string, isBot: boolean }[]) => {
+      const clamped = playersConfig.slice(0, 6);
+      const newPlayers: Player[] = clamped.map((config, i) => ({
         id: `p${i + 1}`,
-        name: name.trim() || `Player ${i + 1}`,
+        name: config.name.trim() || `Player ${i + 1}`,
         balance: 1500,
         position: 0,
         inJail: false,
         jailTurns: 0,
         doublesCount: 0,
         getOutOfJailFreeCards: 0,
+        isBot: config.isBot,
       }));
 
       const firstPlayer = newPlayers[0];

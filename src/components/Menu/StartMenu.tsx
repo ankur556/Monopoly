@@ -19,21 +19,29 @@ export function StartMenu() {
 
   const [step, setStep] = useState<MenuStep>("HOME");
   const [playerCount, setPlayerCount] = useState(2);
-  const [names, setNames] = useState<string[]>(
-    Array.from({ length: 6 }, (_, i) => `Player ${i + 1}`),
+  const [playersConfig, setPlayersConfig] = useState<{ name: string, isBot: boolean }[]>(
+    Array.from({ length: 6 }, (_, i) => ({ name: `Player ${i + 1}`, isBot: false })),
   );
   const [comingSoonVisible, setComingSoonVisible] = useState(false);
 
   function updateName(index: number, value: string) {
-    setNames((prev) => {
+    setPlayersConfig((prev) => {
       const next = [...prev];
-      next[index] = value;
+      next[index] = { ...next[index], name: value };
+      return next;
+    });
+  }
+
+  function toggleBot(index: number) {
+    setPlayersConfig((prev) => {
+      const next = [...prev];
+      next[index] = { ...next[index], isBot: !next[index].isBot };
       return next;
     });
   }
 
   function handleStartGame() {
-    initLocalGame(names.slice(0, playerCount));
+    initLocalGame(playersConfig.slice(0, playerCount));
   }
 
   function handleOnlineClick() {
@@ -179,15 +187,28 @@ export function StartMenu() {
                     <label className={`block text-[9px] font-black uppercase tracking-widest ${color.label} mb-0.5`}>
                       Player {i + 1}
                     </label>
-                    <input
-                      id={`player-name-${i + 1}`}
-                      type="text"
-                      maxLength={20}
-                      value={names[i]}
-                      onChange={(e) => updateName(i, e.target.value)}
-                      placeholder={`Player ${i + 1}`}
-                      className="w-full bg-transparent text-sm font-semibold text-white placeholder:text-white/25 focus:outline-none"
-                    />
+                    <div className="flex gap-2">
+                      <input
+                        id={`player-name-${i + 1}`}
+                        type="text"
+                        maxLength={20}
+                        value={playersConfig[i].name}
+                        onChange={(e) => updateName(i, e.target.value)}
+                        placeholder={`Player ${i + 1}`}
+                        className="w-full bg-transparent text-sm font-semibold text-white placeholder:text-white/25 focus:outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => toggleBot(i)}
+                        className={`shrink-0 rounded-md px-2 py-0.5 text-[10px] font-bold uppercase transition ${
+                          playersConfig[i].isBot
+                            ? "bg-amber-500 text-white"
+                            : "bg-white/10 text-white/50 hover:bg-white/20 hover:text-white/80"
+                        }`}
+                      >
+                        {playersConfig[i].isBot ? "🤖 BOT" : "👤 HUMAN"}
+                      </button>
+                    </div>
                   </div>
                 </div>
               );

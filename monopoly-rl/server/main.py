@@ -2,8 +2,12 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 from typing import Optional
+
+# Ensure the parent directory (monopoly-rl) is in the python path
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import numpy as np
 import torch
@@ -24,13 +28,25 @@ class ActResponse(BaseModel):
     action: int
     model_type: str             # "ppo" or "bc"
 
+from server.frontend_adapter import FrontendActRequest, FrontendActResponse, parse_frontend_state, map_action_to_frontend
+
 
 # ── App setup ─────────────────────────────────────────────────────────────────
+
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(
     title="Monopoly RL Model Server",
     description="Serves trained Monopoly RL agents via REST API.",
     version="1.0.0",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Model globals — loaded at startup
@@ -50,8 +66,8 @@ def _load_model(ppo_path: str, bc_path: str, device: str):
     ppo_p = Path(ppo_path)
     if ppo_p.exists():
         try:
-            from stable_baselines3 import PPO
-            _model = PPO.load(str(ppo_p), device=device)
+            from sb3_contrib import MaskablePPO
+            _model = MaskablePPO.load(str(ppo_p), device=device)
             _model_type = "ppo"
             print(f"[Server] Loaded PPO model from {ppo_p}")
             return
@@ -144,6 +160,54 @@ async def act(request: ActRequest):
         action = random.choice(legal)
 
     return ActResponse(action=action, model_type=_model_type)
+
+@app.post("/act_frontend", response_model=FrontendActResponse)
+async def act_frontend(request: FrontendActRequest):
+    """Choose an action given the frontend JSON state."""
+    if _model is None or _model_type == "random":
+        return FrontendActResponse(actionType="END_TURN")
+
+    # 1. Parse into state_dict and reconstruct engine
+    state_dict, engine = parse_frontend_state(request)
+    
+    # 2. Get legal actions
+    legal = engine.get_legal_actions()
+    
+    # Filter out OFFER_TRADE actions since bots shouldn't initiate trades
+    from env.game_engine import OFFER_TRADE_BASE, ACCEPT_TRADE
+    legal = [a for a in legal if not (OFFER_TRADE_BASE <= a < ACCEPT_TRADE)]
+    
+    if not legal:
+        from env.game_engine import END_TURN
+        return map_action_to_frontend(END_TURN)
+
+    # 3. Encode state
+    from env.state_encoder import encode_state
+    obs = encode_state(state_dict, legal)
+    
+    # 4. Predict
+    obs_np = np.array(obs, dtype=np.float32)
+    if _model_type == "ppo":
+        from env.state_encoder import action_mask
+        legal_mask = action_mask(legal)
+        action, _ = _model.predict(obs_np, deterministic=True, action_masks=legal_mask)
+        action = int(action)
+        if action not in legal:
+            action = legal[0]
+    elif _model_type == "bc":
+        with torch.no_grad():
+            obs_t = torch.from_numpy(obs_np).unsqueeze(0).to(_device)
+            legal_mask = torch.zeros(1, _n_actions, dtype=torch.bool, device=_device)
+            for a in legal:
+                if a < _n_actions:
+                    legal_mask[0, a] = True
+            actions, _, _ = _model.masked_action(obs_t, legal_mask, deterministic=True)
+            action = int(actions[0].cpu().item())
+    else:
+        import random
+        action = random.choice(legal)
+        
+    return map_action_to_frontend(action)
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
