@@ -13,6 +13,7 @@ class Phase(str, Enum):
     BUY = 'BUY'
     AUCTION = 'AUCTION'
     POST_ROLL = 'POST_ROLL'
+    TRADE_RESPONSE = 'TRADE_RESPONSE'
     GAME_OVER = 'GAME_OVER'
 
 
@@ -32,7 +33,10 @@ AUCTION_BID_HIGH = 11   # AUCTION: bid 60% of balance
 AUCTION_BID_ALL = 12    # AUCTION: bid entire balance
 # BUILD_BASE + position = buy house at position (positions 0-39 mapped to actions 13-52)
 BUILD_BASE = 13
-N_ACTIONS = 53
+OFFER_TRADE_BASE = 53
+ACCEPT_TRADE = 93
+REJECT_TRADE = 94
+N_ACTIONS = 95
 
 
 # ── Data classes ──────────────────────────────────────────────────────────────
@@ -115,6 +119,8 @@ class MonopolyEngine:
         self.phase: Phase = Phase.PRE_ROLL
         self.last_roll: Tuple[int, int] = (0, 0)
         self.pending_property: Optional[int] = None  # position of property to buy/auction
+        self.pending_trade: Optional[dict] = None
+        self.completed_monopolies: set = set()
         self.turn_number: int = 0
 
         # Auction state
@@ -144,6 +150,9 @@ class MonopolyEngine:
         self.phase = Phase.PRE_ROLL
         self.last_roll = (0, 0)
         self.pending_property = None
+        self.pending_trade = None
+        self.trade_offers_made = 0
+        self.completed_monopolies = set()
         self.turn_number = 0
 
         # Clear auction state
@@ -203,6 +212,9 @@ class MonopolyEngine:
             if bidder.balance >= min_bid and AUCTION_BID_ALL not in legal:
                 legal.append(AUCTION_BID_ALL)
 
+        elif self.phase == Phase.TRADE_RESPONSE:
+            legal.extend([ACCEPT_TRADE, REJECT_TRADE])
+
         elif self.phase == Phase.POST_ROLL:
             legal.append(END_TURN)
             # Building houses: scan all properties player owns with monopoly
@@ -228,25 +240,51 @@ class MonopolyEngine:
                     if player.balance >= sq.house_cost:
                         legal.append(BUILD_BASE + pos)
 
+            # Trade offer logic
+            if self.trade_offers_made < 1:
+                for pos in range(40):
+                    sq = BOARD[pos]
+                    if sq.type not in ('property', 'railroad', 'utility'):
+                        continue
+                    own = self.ownership[pos]
+                    if own.owner is None or own.owner == player.idx:
+                        continue
+                    
+                    # Check if player owns at least one property of the same color group
+                    group = sq.color if sq.type == 'property' else sq.type
+                    owns_any = False
+                    for p in COLOR_GROUPS.get(group, []):
+                        if self.ownership[p].owner == player.idx:
+                            owns_any = True
+                            break
+                    if not owns_any:
+                        continue
+                    
+                    amount = int(1.5 * sq.price)
+                    if player.balance >= amount:
+                        legal.append(OFFER_TRADE_BASE + pos)
+
         return legal
 
     def step(self, action: int) -> Tuple[dict, float, bool, dict]:
         """Execute action. Returns (state_dict, reward, done, info)."""
-        reward = 0.0
+        reward = -0.005
         info: dict = {}
 
         if self.phase == Phase.GAME_OVER:
             return self.state_dict(), 0.0, True, {'error': 'Game already over'}
 
         player = self.players[self.current_player]
+        was_bankrupt = player.is_bankrupt
+        was_game_over = self.phase == Phase.GAME_OVER
 
         # ── PRE_ROLL ──────────────────────────────────────────────────────────
         if self.phase == Phase.PRE_ROLL:
             if player.in_jail:
-                reward = self._handle_jail_action(action, player)
+                reward += self._handle_jail_action(action, player)
             else:
                 if action == ROLL:
-                    reward = self._do_roll(player)
+                    reward += self._do_roll(player)
                 # else: illegal, ignore
 
         # ── BUY ───────────────────────────────────────────────────────────────
@@ -255,7 +293,6 @@ class MonopolyEngine:
                 sq = BOARD[self.pending_property]
                 player.balance -= sq.price
                 self.ownership[self.pending_property].owner = self.current_player
-                reward = 0.0
                 self.pending_property = None
                 self.phase = Phase.POST_ROLL
             elif action == DECLINE:
@@ -266,16 +303,63 @@ class MonopolyEngine:
 
         # ── AUCTION ───────────────────────────────────────────────────────────
         elif self.phase == Phase.AUCTION:
-            reward = self._handle_auction_action(action)
+            reward += self._handle_auction_action(action)
+
+        # ── TRADE_RESPONSE ────────────────────────────────────────────────────
+        elif self.phase == Phase.TRADE_RESPONSE:
+            if action == ACCEPT_TRADE:
+                t = self.pending_trade
+                self.players[t['offerer']].balance -= t['amount']
+                self.players[t['offeree']].balance += t['amount']
+                self.ownership[t['property']].owner = t['offerer']
+                self.phase = Phase.POST_ROLL
+                self.current_player = t['offerer']
+                self.pending_trade = None
+            elif action == REJECT_TRADE:
+                t = self.pending_trade
+                self.phase = Phase.POST_ROLL
+                self.current_player = t['offerer']
+                self.pending_trade = None
 
         # ── POST_ROLL ────────────────────────────────────────────────────────
         elif self.phase == Phase.POST_ROLL:
             if action == END_TURN:
                 self._end_turn()
-            elif action >= BUILD_BASE:
+            elif action >= BUILD_BASE and action < OFFER_TRADE_BASE:
                 pos = action - BUILD_BASE
                 if 0 <= pos < 40:
-                    reward = self._build_house(player, pos)
+                    reward += self._build_house(player, pos)
+            elif action >= OFFER_TRADE_BASE and action < ACCEPT_TRADE:
+                self.trade_offers_made += 1
+                pos = action - OFFER_TRADE_BASE
+                sq = BOARD[pos]
+                amt = int(1.5 * sq.price)
+                self.pending_trade = {
+                    'offerer': self.current_player,
+                    'offeree': self.ownership[pos].owner,
+                    'property': pos,
+                    'amount': amt
+                }
+                self.phase = Phase.TRADE_RESPONSE
+                self.current_player = self.ownership[pos].owner
+
+        # Bankruptcy penalty
+        if not was_bankrupt and player.is_bankrupt:
+            reward -= 5.0
+            
+        # Win reward
+        if self.phase == Phase.GAME_OVER and not was_game_over:
+            active = self._get_active_players()
+            if len(active) == 1 and active[0] == player.idx:
+                reward += 10.0
+
+        # Monopoly reward
+        if not player.is_bankrupt:
+            for color in COLOR_GROUPS.keys():
+                if self._has_monopoly(player.idx, color):
+                    if color not in self.completed_monopolies:
+                        self.completed_monopolies.add(color)
+                        reward += 1.0
 
         done = self.phase == Phase.GAME_OVER
         return self.state_dict(), float(reward), done, info
@@ -635,7 +719,7 @@ class MonopolyEngine:
 
         player.balance -= sq.house_cost
         own.houses += 1
-        return 0.0  # Building is capital investment, reward is future rent income
+        return 0.1  # Building is capital investment, reward is future rent income
 
     # ── Turn management ────────────────────────────────────────────────────────
 
@@ -647,6 +731,7 @@ class MonopolyEngine:
 
     def _advance_turn(self):
         """Move current_player to next non-bankrupt player."""
+        self.trade_offers_made = 0
         active = self._get_active_players()
         if not active:
             self.phase = Phase.GAME_OVER
@@ -916,6 +1001,7 @@ class MonopolyEngine:
             'turn_number': self.turn_number,
             'last_roll': list(self.last_roll),
             'pending_property': self.pending_property,
+            'pending_trade': self.pending_trade,
             'players': [
                 {
                     'idx': p.idx,

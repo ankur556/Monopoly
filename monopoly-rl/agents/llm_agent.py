@@ -38,7 +38,10 @@ _ACTION_NAMES: dict[int, str] = {
 }
 for _pos in range(40):
     _ACTION_NAMES[13 + _pos] = f"Build house on {BOARD[_pos].name} (pos {_pos})"
+    _ACTION_NAMES[53 + _pos] = f"Offer to buy {BOARD[_pos].name} for 1.5x market value (pos {_pos})"
 
+_ACTION_NAMES[93] = "Accept trade offer"
+_ACTION_NAMES[94] = "Reject trade offer"
 
 def _action_name(action_id: int) -> str:
     return _ACTION_NAMES.get(action_id, f"Action {action_id}")

@@ -21,10 +21,12 @@ class MonopolyEnv(gym.Env):
 
     metadata = {'render_modes': []}
 
-    def __init__(self, n_players: int = 4, seed=None):
+    def __init__(self, n_players: int = 4, seed=None, max_steps: int = 2000):
         super().__init__()
         self.n_players = n_players
         self._seed = seed
+        self.max_steps = max_steps
+        self._step_count = 0
         self.engine = MonopolyEngine(n_players=n_players, seed=seed)
 
         self.observation_space = gym.spaces.Box(
@@ -42,6 +44,7 @@ class MonopolyEnv(gym.Env):
         else:
             self.engine = MonopolyEngine(n_players=self.n_players, seed=self._seed)
 
+        self._step_count = 0
         state = self.engine.reset()
         legal = self.engine.get_legal_actions()
         obs = encode_state(state, legal)
@@ -68,11 +71,19 @@ class MonopolyEnv(gym.Env):
             'state': state,
             **engine_info,
         }
-        return obs, float(reward), done, False, info
+        
+        self._step_count += 1
+        truncated = self._step_count >= self.max_steps
+        
+        return obs, float(reward), done, truncated, info
 
     def get_legal_actions(self):
         """Convenience method: returns legal actions for current player."""
         return self.engine.get_legal_actions()
+
+    def action_masks(self) -> np.ndarray:
+        """Required by MaskablePPO. Returns mask for current state."""
+        return action_mask(self.engine.get_legal_actions())
 
     def render(self):
         """No rendering implemented."""

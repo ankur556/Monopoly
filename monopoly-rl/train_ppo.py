@@ -44,7 +44,8 @@ def main(total_timesteps, n_envs, save_dir, bc_model, device, use_wandb, config)
     # ── Import heavy deps here to keep CLI fast ───────────────────────────────
     import torch
     import numpy as np
-    from stable_baselines3 import PPO
+    from sb3_contrib import MaskablePPO
+    from sb3_contrib.common.wrappers import ActionMasker
     from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor
     from stable_baselines3.common.callbacks import (
         CheckpointCallback, EvalCallback,
@@ -58,7 +59,8 @@ def main(total_timesteps, n_envs, save_dir, bc_model, device, use_wandb, config)
     # ── Build vectorised environments ─────────────────────────────────────────
     def _make_env(rank: int):
         def _init():
-            return MonopolyEnv(n_players=4, seed=rank)
+            env = MonopolyEnv(n_players=4, seed=rank)
+            return ActionMasker(env, lambda e: e.action_masks())
         return _init
 
     click.echo(f"Building {n_envs} parallel environments...")
@@ -87,7 +89,7 @@ def main(total_timesteps, n_envs, save_dir, bc_model, device, use_wandb, config)
         tensorboard_log=f"{save_dir}/tb_logs",
     )
 
-    model = PPO(**ppo_kwargs)
+    model = MaskablePPO(**ppo_kwargs)
 
     # ── Initialise policy from BC weights ─────────────────────────────────────
     bc_path = Path(bc_model)

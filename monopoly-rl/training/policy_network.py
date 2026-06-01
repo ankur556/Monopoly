@@ -5,15 +5,15 @@ import torch
 import torch.nn as nn
 from env.game_engine import N_ACTIONS
 
-OBS_DIM = 214
+OBS_DIM = 261
 
 
 class PolicyNetwork(nn.Module):
     """
-    MLP policy that maps a 214-dim observation to action logits.
+    MLP policy that maps a 261-dim observation to action logits.
 
     Architecture:
-        Linear(214 → 512) → LayerNorm → ReLU
+        Linear(261 → 512) → LayerNorm → ReLU
         Linear(512 → 512) → LayerNorm → ReLU
         Linear(512 → 256) → LayerNorm → ReLU
         Linear(256 → 53)   ← action logits

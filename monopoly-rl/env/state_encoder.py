@@ -3,7 +3,7 @@ import numpy as np
 from .board import BOARD, COLOR_GROUPS
 from .game_engine import N_ACTIONS
 
-OBS_DIM = 214  # total observation dimensions
+OBS_DIM = 261  # total observation dimensions
 
 
 def encode_state(state: dict, legal_actions: list) -> np.ndarray:
@@ -25,9 +25,14 @@ def encode_state(state: dict, legal_actions: list) -> np.ndarray:
       [158]     — last roll die2 / 6.0
       [159]     — pending_property position / 40.0 (0.0 if none)
       [160]     — pending_property flag (1.0 if any)
-      [161:214] — legal action mask (N_ACTIONS = 53 values, 0.0 / 1.0)
+      [161]     — trade pending flag (1.0 if any)
+      [162]     — offerer_idx / 6.0
+      [163]     — offeree_idx / 6.0
+      [164]     — property_pos / 40.0
+      [165]     — amount / 5000.0
+      [166:261] — legal action mask (N_ACTIONS = 95 values, 0.0 / 1.0)
 
-    Total: 40 + 40 + 40 + 6 + 6 + 6 + 6 + 6 + 6 + 1 + 1 + 1 + 1 + 1 + 53 = 214
+    Total: 40 + 40 + 40 + 6 + 6 + 6 + 6 + 6 + 6 + 1 + 1 + 1 + 1 + 1 + 5 + 95 = 261
     """
     obs = np.zeros(OBS_DIM, dtype=np.float32)
     n_players = len(state['players'])
@@ -106,9 +111,20 @@ def encode_state(state: dict, legal_actions: list) -> np.ndarray:
         obs[159] = 0.0
         obs[160] = 0.0
 
-    # [161:214] — legal action mask
+    # [161:166] — pending trade
+    trade = state.get('pending_trade', None)
+    if trade is not None:
+        obs[161] = 1.0
+        obs[162] = trade['offerer'] / 6.0
+        obs[163] = trade['offeree'] / 6.0
+        obs[164] = trade['property'] / 40.0
+        obs[165] = min(trade['amount'] / 5000.0, 1.0)
+    else:
+        obs[161:166] = 0.0
+
+    # [166:261] — legal action mask
     mask = action_mask(legal_actions)
-    obs[161:161 + N_ACTIONS] = mask.astype(np.float32)
+    obs[166:166 + N_ACTIONS] = mask.astype(np.float32)
 
     return obs
 
