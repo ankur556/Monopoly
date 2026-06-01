@@ -122,6 +122,7 @@ class MonopolyEngine:
         self.pending_trade: Optional[dict] = None
         self.completed_monopolies: set = set()
         self.turn_number: int = 0
+        self.pending_rewards: List[float] = [0.0] * 6
 
         # Auction state
         self.auction_property: Optional[int] = None
@@ -154,6 +155,7 @@ class MonopolyEngine:
         self.trade_offers_made = 0
         self.completed_monopolies = set()
         self.turn_number = 0
+        self.pending_rewards = [0.0] * self.n_players
 
         # Clear auction state
         self.auction_property = None
@@ -350,8 +352,8 @@ class MonopolyEngine:
         # Win reward
         if self.phase == Phase.GAME_OVER and not was_game_over:
             active = self._get_active_players()
-            if len(active) == 1 and active[0] == player.idx:
-                reward += 10.0
+            if len(active) == 1:
+                self.pending_rewards[active[0]] += 10.0
 
         # Monopoly reward
         if not player.is_bankrupt:
@@ -361,8 +363,12 @@ class MonopolyEngine:
                         self.completed_monopolies.add(color)
                         reward += 1.0
 
+        self.pending_rewards[self.current_player] += reward
+        final_reward = self.pending_rewards[self.current_player]
+        self.pending_rewards[self.current_player] = 0.0
+
         done = self.phase == Phase.GAME_OVER
-        return self.state_dict(), float(reward), done, info
+        return self.state_dict(), float(final_reward), done, info
 
     # ── Dice & movement ────────────────────────────────────────────────────────
 
@@ -520,11 +526,17 @@ class MonopolyEngine:
             payer.balance -= amount
             if payee_idx is not None:
                 self.players[payee_idx].balance += amount
+                self.pending_rewards[payer_idx] -= amount / 100.0
+                self.pending_rewards[payee_idx] += amount / 100.0
+            else:
+                self.pending_rewards[payer_idx] -= amount / 100.0
             return True
         else:
             # Bankrupt: transfer what we have, forfeit assets
             if payee_idx is not None:
                 self.players[payee_idx].balance += payer.balance
+                self.pending_rewards[payee_idx] += payer.balance / 100.0
+                self.pending_rewards[payee_idx] += 5.0
             payer.balance = 0
             payer.is_bankrupt = True
             # All properties return to bank
