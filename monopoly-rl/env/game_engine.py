@@ -410,7 +410,6 @@ class MonopolyEngine:
         reward = 0.0
         if new_pos < old_pos or new_pos == 0:
             player.balance += 200
-            reward += 200.0
 
         player.position = new_pos
         reward += self._process_landing(player_idx, new_pos, steps)
@@ -434,7 +433,7 @@ class MonopolyEngine:
             elif own.owner != player_idx and not own.mortgaged:
                 rent = self._calc_rent(position, dice_sum)
                 paid = self._attempt_payment(player_idx, own.owner, rent)
-                reward -= float(rent) if paid else 0.0
+                
 
         elif sq.type == 'railroad':
             own = self.ownership[position]
@@ -444,7 +443,7 @@ class MonopolyEngine:
             elif own.owner != player_idx and not own.mortgaged:
                 rent = self._calc_rent(position, dice_sum)
                 paid = self._attempt_payment(player_idx, own.owner, rent)
-                reward -= float(rent) if paid else 0.0
+                
 
         elif sq.type == 'utility':
             own = self.ownership[position]
@@ -454,17 +453,17 @@ class MonopolyEngine:
             elif own.owner != player_idx and not own.mortgaged:
                 rent = self._calc_rent(position, dice_sum)
                 paid = self._attempt_payment(player_idx, own.owner, rent)
-                reward -= float(rent) if paid else 0.0
+                
 
         elif sq.type == 'tax':
             paid = self._attempt_payment(player_idx, None, sq.tax_amount)
-            reward -= float(sq.tax_amount) if paid else 0.0
+            
 
         elif sq.type == 'chance':
-            reward += self._draw_chance(player_idx)
+            self._draw_chance(player_idx)
 
         elif sq.type == 'chest':
-            reward += self._draw_chest(player_idx)
+            self._draw_chest(player_idx)
 
         elif sq.type == 'go_to_jail':
             self._go_to_jail(player_idx)
@@ -588,7 +587,6 @@ class MonopolyEngine:
                 new_pos = (player.position + d1 + d2) % 40
                 if new_pos < player.position or new_pos == 0:
                     player.balance += 200
-                    reward += 200.0
                 player.position = new_pos
                 self.phase = Phase.POST_ROLL
             elif player.jail_turns >= 3:
@@ -603,7 +601,6 @@ class MonopolyEngine:
                 # Passing Go check
                 if new_pos < player.position or new_pos == 0:
                     player.balance += 200
-                    reward += 200.0
                 player.position = new_pos
                 reward += self._process_landing(player.idx, new_pos, d1 + d2)
                 self.phase = Phase.POST_ROLL
@@ -887,7 +884,6 @@ class MonopolyEngine:
 
         elif card == 'bank_error_200':
             player.balance += 200
-            reward += 200.0
 
         elif card == 'doctor_fee_50':
             self._attempt_payment(player_idx, None, 50)
@@ -971,10 +967,8 @@ class MonopolyEngine:
         if target_pos <= old_pos and target_pos != old_pos:
             # Passing Go
             player.balance += 200
-            reward += 200.0
         elif target_pos == 0:
             player.balance += 200
-            reward += 200.0
 
         player.position = target_pos
         reward += self._process_landing(player_idx, target_pos, sum(self.last_roll))
