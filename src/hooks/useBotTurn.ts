@@ -72,6 +72,7 @@ export function useBotTurn() {
     store.isMoving,
     store.isRolling,
     store.turnPhase,
+    store.pendingAction,
     store.auction.status,
     store.auction.currentBidderIndex,
     store.trade.status,

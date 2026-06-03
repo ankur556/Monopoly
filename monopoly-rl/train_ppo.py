@@ -83,7 +83,7 @@ def main(total_timesteps, n_envs, save_dir, bc_model, device, use_wandb, config)
         gamma=ppo_cfg.get("gamma", 0.99),
         gae_lambda=ppo_cfg.get("gae_lambda", 0.95),
         clip_range=ppo_cfg.get("clip_range", 0.2),
-        ent_coef=ppo_cfg.get("ent_coef", 0.01),
+        ent_coef=ppo_cfg.get("ent_coef", 0.05),
         device=device,
         verbose=1,
         tensorboard_log=f"{save_dir}/tb_logs",

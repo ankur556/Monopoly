@@ -31,7 +31,7 @@ def main(n_games, n_workers, save_dir, checkpoint_every, config, seed):
     save_dir = save_dir or col_cfg.get("save_dir", "data_collected")
     checkpoint_every = checkpoint_every or col_cfg.get("checkpoint_every", 50)
 
-    click.echo(f"Starting data collection: {n_games} games → {save_dir}/")
+    click.echo(f"Starting data collection: {n_games} games -> {save_dir}/")
 
     from data.collector import DataCollector
     collector = DataCollector(

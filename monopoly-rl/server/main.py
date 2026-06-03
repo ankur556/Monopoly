@@ -100,6 +100,14 @@ async def startup_event():
     device = os.getenv("MODEL_DEVICE", "cpu")
     _load_model(ppo_path, bc_path, device)
 
+    # Instantiate LLM Agent for Hybrid Auction Logic
+    from agents.llm_agent import LLMAgent
+    global _llm_agent
+    try:
+        _llm_agent = LLMAgent(player_idx=0, max_retries=2)
+    except EnvironmentError:
+        _llm_agent = None
+
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
@@ -174,8 +182,14 @@ async def act_frontend(request: FrontendActRequest):
     legal = engine.get_legal_actions()
     
     # Filter out OFFER_TRADE actions since bots shouldn't initiate trades
-    from env.game_engine import OFFER_TRADE_BASE, ACCEPT_TRADE
+    from env.game_engine import OFFER_TRADE_BASE, ACCEPT_TRADE, BUY_PROP, DECLINE
     legal = [a for a in legal if not (OFFER_TRADE_BASE <= a < ACCEPT_TRADE)]
+    
+    # Debug logging
+    phase_name = engine.phase.value if hasattr(engine.phase, 'value') else str(engine.phase)
+    action_names = {0: "ROLL", 1: "END_TURN", 2: "BUY_PROP", 3: "DECLINE", 4: "PAY_JAIL", 7: "AUCTION_PASS", 8: "BID_MIN", 9: "BID_LOW", 10: "BID_MED", 11: "BID_HIGH", 12: "BID_ALL"}
+    legal_names = [action_names.get(a, f"action_{a}") for a in legal]
+    print(f"[Bot] Phase={phase_name} | Player={engine.current_player} | Legal={legal_names} | pendingAction={request.pendingAction}")
     
     if not legal:
         from env.game_engine import END_TURN
@@ -187,7 +201,20 @@ async def act_frontend(request: FrontendActRequest):
     
     # 4. Predict
     obs_np = np.array(obs, dtype=np.float32)
-    if _model_type == "ppo":
+    if engine.phase == "AUCTION" and _llm_agent is not None:
+        # HYBRID ARCHITECTURE: Offload Auction logic to LLM
+        # The bidder is the player who needs to decide, NOT the turn owner
+        if engine.auction_participants and engine.auction_bidder_idx < len(engine.auction_participants):
+            bidder_idx = engine.auction_participants[engine.auction_bidder_idx]
+        else:
+            bidder_idx = engine.current_player
+        _llm_agent.player_idx = bidder_idx
+        try:
+            action = _llm_agent.act(state_dict, legal)
+        except Exception as e:
+            print(f"[Hybrid Engine] LLM failed to decide auction: {e}")
+            action = legal[0]
+    elif _model_type == "ppo":
         from env.state_encoder import action_mask
         legal_mask = action_mask(legal)
         action, _ = _model.predict(obs_np, deterministic=True, action_masks=legal_mask)
@@ -207,7 +234,9 @@ async def act_frontend(request: FrontendActRequest):
         import random
         action = random.choice(legal)
         
-    return map_action_to_frontend(action)
+    result = map_action_to_frontend(action)
+    print(f"[Bot] -> Chose action_id={action} ({action_names.get(action, '?')}) -> {result.actionType}")
+    return result
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

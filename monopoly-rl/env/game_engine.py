@@ -295,6 +295,14 @@ class MonopolyEngine:
                 sq = BOARD[self.pending_property]
                 player.balance -= sq.price
                 self.ownership[self.pending_property].owner = self.current_player
+                reward += 1.0  # Heuristic reward for buying property
+                
+                # Check if this purchase completed a monopoly
+                if sq.color:
+                    if self._has_monopoly(self.current_player, sq.color) and sq.color not in self.completed_monopolies:
+                        self.completed_monopolies.add(sq.color)
+                        reward += 5.0  # Heuristic reward for completing monopoly
+                        
                 self.pending_property = None
                 self.phase = Phase.POST_ROLL
             elif action == DECLINE:
@@ -692,6 +700,7 @@ class MonopolyEngine:
         if winner is not None and prop is not None:
             self.players[winner].balance -= self.auction_current_bid
             self.ownership[prop].owner = winner
+            self.pending_rewards[winner] += 0.1  # Heuristic reward for winning auction
 
         # Clean up auction state
         self.auction_property = None
@@ -728,7 +737,7 @@ class MonopolyEngine:
 
         player.balance -= sq.house_cost
         own.houses += 1
-        return 0.1  # Building is capital investment, reward is future rent income
+        return 1.0  # Heuristic reward for building a house
 
     # ── Turn management ────────────────────────────────────────────────────────
 

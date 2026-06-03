@@ -826,6 +826,7 @@ export const useGameStore = create<GameState>((set, get) => {
           ledger,
           isRolling: false,
           pendingAction: { type: "buy", propertyId: square.id },
+          turnPhase: "POST_ROLL",
           message: `${message}, landed on ${square.name} ($${square.price}). Buy or pass?`,
         });
         return;

@@ -77,14 +77,32 @@ def _summarise_state(state: dict, player_idx: int, legal_actions: list[int]) -> 
         sq = BOARD[state["pending_property"]]
         lines.append(f"\nPending purchase: {sq.name} costs ${sq.price}")
 
-    # Auction state
+    # Auction state — give LLM full property economics for smart bidding
     if state.get("auction") is not None:
         auc = state["auction"]
         sq = BOARD[auc["property"]]
-        lines.append(
-            f"\nAuction: {sq.name} — current bid ${auc['current_bid']} "
-            f"by P{(auc['highest_bidder'] or -1)+1}"
-        )
+        lines.append(f"\n=== AUCTION IN PROGRESS ===")
+        lines.append(f"Property: {sq.name} (Position {sq.position})")
+        lines.append(f"List Price: ${sq.price}  |  Mortgage Value: ${sq.mortgage_value}")
+        if sq.rents and len(sq.rents) >= 6:
+            lines.append(f"Rent Table: base=${sq.rents[0]}, 1h=${sq.rents[1]}, 2h=${sq.rents[2]}, 3h=${sq.rents[3]}, 4h=${sq.rents[4]}, hotel=${sq.rents[5]}")
+        elif sq.rents:
+            lines.append(f"Rent values: {', '.join(f'${r}' for r in sq.rents)}")
+        if sq.color:
+            group_positions = COLOR_GROUPS.get(sq.color, [])
+            group_names = [BOARD[gp].name for gp in group_positions]
+            # Check how many in this color group the bidder already owns
+            owned_in_group = sum(1 for gp in group_positions if state["ownership"].get(str(gp), {}).get("owner") == player_idx)
+            lines.append(f"Color Group: {sq.color} ({', '.join(group_names)})")
+            lines.append(f"You own {owned_in_group}/{len(group_positions)} in this group. {'BUYING THIS COMPLETES YOUR MONOPOLY!' if owned_in_group == len(group_positions) - 1 else ''}")
+        if sq.type == "railroad":
+            rr_positions = [5, 15, 25, 35]
+            owned_rr = sum(1 for rp in rr_positions if state["ownership"].get(str(rp), {}).get("owner") == player_idx)
+            lines.append(f"Railroad. You own {owned_rr}/4 railroads. Rent scales: $25/$50/$100/$200")
+        if sq.type == "utility":
+            lines.append(f"Utility. Rent = 4x dice (1 util) or 10x dice (2 utils)")
+        lines.append(f"Current Bid: ${auc['current_bid']} by P{(auc['highest_bidder'] or -1)+1}")
+        lines.append(f"Your Balance: ${p['balance']}")
 
     # Owned properties
     my_props = []
@@ -167,10 +185,28 @@ class LLMAgent:
 
         summary = _summarise_state(state, self.player_idx, legal_actions)
         system_prompt = (
-            "You are an expert Monopoly strategist. Given the game state, choose the best action.\n"
-            "Reply with ONLY the integer action ID from the legal actions list — nothing else.\n"
-            "Think about: cash flow, monopoly completion, opponent threats, and long-term ROI."
+            "You are an expert, highly competitive Monopoly AI agent. Your ultimate goal is to win the game by acquiring assets, completing color sets, and bankrupting your opponents.\n\n"
+            "CRITICAL STRATEGIC DIRECTIVES:\n"
+            "1. PROPERTY ACQUISITION IS MANDATORY: You cannot win Monopoly by hoarding cash. If you land on an unowned property and have sufficient funds, you MUST buy it.\n"
+            "2. IGNORE RISK AVERSION: Do not skip buying a property just to keep a high cash balance. Early in the game, your priority is to convert cash into real estate. Only pass on an unowned property if buying it would force you into immediate bankruptcy.\n"
+            "3. VALUE ASSETS OVER CASH: Properties generate rent and can be mortgaged later if you need emergency cash. An unowned property is an opportunity you cannot afford to miss.\n\n"
+            "AUCTION BIDDING STRATEGY:\n"
+            "When an auction is in progress, use this logic to decide how much to bid:\n"
+            "- If the property completes a MONOPOLY for you: bid up to 2x the list price (you will make it back in rent).\n"
+            "- If the property is in a color group where you already own 1+: bid up to 1.5x the list price.\n"
+            "- If the property is a railroad and you already own 1+: bid up to the list price.\n"
+            "- For any other unowned property: bid up to the list price.\n"
+            "- NEVER pass on an auction if your balance exceeds the current bid. Passing means an opponent gets it for free.\n"
+            "- Choose the bid tier that gets closest to your target bid without exceeding your balance.\n"
+            "  Action 8 = bid $1 above current. Action 9 = bid 15% of balance. Action 10 = bid 30%. Action 11 = bid 60%. Action 12 = bid entire balance.\n\n"
+            "STRICT OUTPUT FORMAT:\n"
+            "Output your decision as a strict JSON object containing the integer 'action_id' from the Legal Actions list.\n"
+            "Example Output:\n"
+            '{"action_id": 2}'
         )
+
+        # Force Groq to return JSON
+        self._client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
         for attempt in range(self.max_retries):
             try:
@@ -182,17 +218,16 @@ class LLMAgent:
                     ],
                     temperature=self.temperature,
                     max_tokens=self.max_tokens,
+                    response_format={"type": "json_object"},
                 )
                 raw = response.choices[0].message.content.strip()
-                # Extract first integer that is a legal action
-                for token in raw.split():
-                    token = token.strip(".,;:")
-                    if token.lstrip("-").isdigit():
-                        action = int(token)
-                        if action in legal_actions:
-                            if self.cache_enabled and cache_key:
-                                self._cache[cache_key] = action
-                            return action
+                parsed = json.loads(raw)
+                if "action_id" in parsed:
+                    action = int(parsed["action_id"])
+                    if action in legal_actions:
+                        if self.cache_enabled and cache_key:
+                            self._cache[cache_key] = action
+                        return action
             except Exception:
                 if attempt == self.max_retries - 1:
                     break

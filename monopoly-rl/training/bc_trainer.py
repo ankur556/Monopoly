@@ -178,7 +178,7 @@ class BCTrainer:
                 best_val_loss = val_loss
                 patience_counter = 0
                 self.model.save(str(best_path))
-                print(f"  ✓ New best model saved (val_loss={val_loss:.4f})")
+                print(f"  > New best model saved (val_loss={val_loss:.4f})")
             else:
                 patience_counter += 1
                 if patience_counter >= self.early_stop_patience:

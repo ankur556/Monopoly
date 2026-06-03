@@ -58,18 +58,17 @@ def parse_frontend_state(req: FrontendActRequest) -> tuple[dict, Any]:
     
     player_id_to_idx = {p.id: i for i, p in enumerate(req.players)}
     
-    # 1. Map Phase
-    if req.auction.status == "active":
+    # 1. Map Phase — check pendingAction FIRST (it takes priority)
+    if req.pendingAction and req.pendingAction.get('type') == 'buy':
+        phase = Phase.BUY
+    elif req.auction.status == "active":
         phase = Phase.AUCTION
     elif req.trade.status == "pending":
         phase = Phase.TRADE_RESPONSE
     elif req.turnPhase == "PRE_ROLL":
         phase = Phase.PRE_ROLL
     elif req.turnPhase == "POST_ROLL":
-        if req.pendingAction and req.pendingAction.get('type') == 'buy':
-            phase = Phase.BUY
-        else:
-            phase = Phase.POST_ROLL
+        phase = Phase.POST_ROLL
     else:
         phase = Phase.GAME_OVER
         
