@@ -295,13 +295,13 @@ class MonopolyEngine:
                 sq = BOARD[self.pending_property]
                 player.balance -= sq.price
                 self.ownership[self.pending_property].owner = self.current_player
-                reward += 1.0  # Heuristic reward for buying property
+                reward += 0.3  # Moderate reward for buying property
                 
                 # Check if this purchase completed a monopoly
                 if sq.color:
                     if self._has_monopoly(self.current_player, sq.color) and sq.color not in self.completed_monopolies:
                         self.completed_monopolies.add(sq.color)
-                        reward += 5.0  # Heuristic reward for completing monopoly
+                        reward += 2.0  # Strong reward for completing monopoly
                         
                 self.pending_property = None
                 self.phase = Phase.POST_ROLL
@@ -737,7 +737,7 @@ class MonopolyEngine:
 
         player.balance -= sq.house_cost
         own.houses += 1
-        return 1.0  # Heuristic reward for building a house
+        return 0.5  # Good reward for building houses
 
     # ── Turn management ────────────────────────────────────────────────────────
 

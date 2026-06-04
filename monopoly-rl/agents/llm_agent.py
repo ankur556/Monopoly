@@ -101,6 +101,30 @@ def _summarise_state(state: dict, player_idx: int, legal_actions: list[int]) -> 
             lines.append(f"Railroad. You own {owned_rr}/4 railroads. Rent scales: $25/$50/$100/$200")
         if sq.type == "utility":
             lines.append(f"Utility. Rent = 4x dice (1 util) or 10x dice (2 utils)")
+        # Expected Value calculation
+        ev = sq.price  # Base EV is list price
+        if sq.color:
+            owned = sum(1 for gp in group_positions if state["ownership"].get(str(gp), {}).get("owner") == player_idx)
+            total_in_group = len(group_positions)
+            if owned == total_in_group - 1:
+                ev = sq.price * 2.5 + (sq.rents[3] if len(sq.rents) >= 4 else 0) # Monopoly multiplier + 3 house rent potential
+            elif owned > 0:
+                ev = sq.price * 1.5
+        elif sq.type == 'railroad':
+            owned_rr = sum(1 for rp in [5, 15, 25, 35] if state["ownership"].get(str(rp), {}).get("owner") == player_idx)
+            if owned_rr > 0:
+                ev = sq.price + (50 * owned_rr)
+        
+        # Check if an opponent is 1 away from monopoly
+        if sq.color:
+            for opp_idx in range(len(state["players"])):
+                if opp_idx == player_idx: continue
+                opp_owned = sum(1 for gp in group_positions if state["ownership"].get(str(gp), {}).get("owner") == opp_idx)
+                if opp_owned == total_in_group - 1:
+                    ev = max(ev, sq.price * 2.0) # Defensive EV (blocking)
+                    lines.append(f"CRITICAL: Buying this BLOCKS P{opp_idx+1} from getting a monopoly!")
+        
+        lines.append(f"Expected Value (EV): ~${int(ev)}")
         lines.append(f"Current Bid: ${auc['current_bid']} by P{(auc['highest_bidder'] or -1)+1}")
         lines.append(f"Your Balance: ${p['balance']}")
 
@@ -187,17 +211,16 @@ class LLMAgent:
         system_prompt = (
             "You are an expert, highly competitive Monopoly AI agent. Your ultimate goal is to win the game by acquiring assets, completing color sets, and bankrupting your opponents.\n\n"
             "CRITICAL STRATEGIC DIRECTIVES:\n"
-            "1. PROPERTY ACQUISITION IS MANDATORY: You cannot win Monopoly by hoarding cash. If you land on an unowned property and have sufficient funds, you MUST buy it.\n"
-            "2. IGNORE RISK AVERSION: Do not skip buying a property just to keep a high cash balance. Early in the game, your priority is to convert cash into real estate. Only pass on an unowned property if buying it would force you into immediate bankruptcy.\n"
-            "3. VALUE ASSETS OVER CASH: Properties generate rent and can be mortgaged later if you need emergency cash. An unowned property is an opportunity you cannot afford to miss.\n\n"
+            "1. BALANCED ACQUISITION: Do not hoard cash, but do not buy properties if it risks immediate bankruptcy. Maintain a safe cash reserve (ideally $200-$300).\n"
+            "2. MONOPOLIES WIN GAMES: Your highest priority is completing color sets so you can build houses. \n"
+            "3. VALUE ASSETS OVER CASH: Properties generate rent and can be mortgaged later. However, do not overspend on low-value properties (like Brown or Light Blue) if it drains your funds.\n\n"
             "AUCTION BIDDING STRATEGY:\n"
-            "When an auction is in progress, use this logic to decide how much to bid:\n"
-            "- If the property completes a MONOPOLY for you: bid up to 2x the list price (you will make it back in rent).\n"
-            "- If the property is in a color group where you already own 1+: bid up to 1.5x the list price.\n"
-            "- If the property is a railroad and you already own 1+: bid up to the list price.\n"
-            "- For any other unowned property: bid up to the list price.\n"
-            "- NEVER pass on an auction if your balance exceeds the current bid. Passing means an opponent gets it for free.\n"
-            "- Choose the bid tier that gets closest to your target bid without exceeding your balance.\n"
+            "When an auction is in progress, you will be provided with the 'Expected Value (EV)' of the property. Use this logic:\n"
+            "- If the property completes a MONOPOLY for you: bid aggressively up to the EV.\n"
+            "- If the property BLOCKS an opponent from a monopoly: bid up to the EV to stop them.\n"
+            "- For any other property: bid up to the EV, but ONLY if you will have at least $200 left over.\n"
+            "- If the current bid exceeds the EV, or if matching it drops your balance below safe levels, PASS (Action 7).\n"
+            "- Choose the bid tier that gets closest to your target bid without exceeding it.\n"
             "  Action 8 = bid $1 above current. Action 9 = bid 15% of balance. Action 10 = bid 30%. Action 11 = bid 60%. Action 12 = bid entire balance.\n\n"
             "STRICT OUTPUT FORMAT:\n"
             "Output your decision as a strict JSON object containing the integer 'action_id' from the Legal Actions list.\n"
