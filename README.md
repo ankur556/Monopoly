@@ -1,6 +1,6 @@
 # 🎲 Monopoly — Full-Stack Board Game with AI Bots
 
-A complete, browser-based Monopoly game with intelligent AI opponents. Built with a React/TypeScript frontend and a Python RL backend, featuring a **3-tier hybrid AI system** that combines deterministic heuristics, Expected Value math, and reinforcement learning to play like a real human.
+A complete, browser-based Monopoly game with intelligent AI opponents. Built with a React/TypeScript frontend and a Python RL backend, featuring a **3-tier hybrid AI system** that combines deterministic heuristics, Expected Value bidding, and reinforcement learning.
 
 ![Monopoly](https://img.shields.io/badge/Game-Monopoly-red?style=for-the-badge)
 ![React](https://img.shields.io/badge/Frontend-React%20%2B%20TypeScript-blue?style=for-the-badge)
@@ -49,8 +49,8 @@ The project is split into two halves that communicate via a REST API:
 
 | Phase | Handler | How It Works |
 |-------|---------|-------------|
-| **BUY** | Deterministic Heuristic | If the bot can afford the property and keep a safe cash reserve ($100 early / $200 mid / $300 late game), it **always buys**. If buying completes a monopoly, it buys regardless of reserve. |
-| **AUCTION** | EV-Capped Heuristic | Each property has a calculated **Expected Value (EV)** based on list price, color group synergy, monopoly potential, blocking value, and game phase. Bots bid up to the EV but never drain cash below safety. Monopoly completion = all-in. |
+| **BUY** | Deterministic Heuristic | If the bot can afford the property and keep a safe cash reserve ($100 early / $200 mid / $300 late game), it **always buys**. If buying completes a monopoly, it goes all-in. |
+| **AUCTION** | EV-Capped Heuristic | Each property has a calculated **Expected Value (EV)** based on list price, color group synergy, monopoly potential, blocking value, and game phase. Bots bid up to their EV limit. |
 | **ROLL / BUILD / END_TURN / JAIL** | PPO Neural Network | A reinforcement learning model trained via Behavioral Cloning + PPO self-play handles movement decisions and house building strategy. |
 
 ---
@@ -89,7 +89,7 @@ The PPO model was trained in two stages:
 
 1. **Stage 1 — Behavioral Cloning:** A Groq LLM (llama-3.1-70b) played thousands of games. Its decisions were recorded as (state, action) pairs and used to train a baseline neural network via supervised learning.
 
-2. **Stage 2 — PPO Self-Play:** The BC model was fine-tuned with Proximal Policy Optimization across 8 parallel environments. Reward shaping encourages property acquisition (+0.3), monopoly completion (+2.0), house building (+0.5), and heavily penalizes bankruptcy (−5.0).
+2. **Stage 2 — PPO Self-Play:** The BC model was fine-tuned with Proximal Policy Optimization across 8 parallel environments. Reward shaping encourages property acquisition (+0.3), monopoly completion (+2.0), building houses (+0.5), and winning (+10.0).
 
 ---
 
@@ -172,6 +172,224 @@ python train_ppo.py --total-timesteps 1000000 --device cuda
 | `--total-timesteps` | 5,000,000 | Total PPO training steps |
 | `--device` | cpu | `cuda` for GPU training |
 | `--n-envs` | 8 | Parallel training environments |
+
+---
+
+## 📊 Detailed Training Pipeline
+
+### Stage 1: Data Collection & Behavioral Cloning
+
+#### 1.1 LLM Data Collection
+
+The first step collects human-like gameplay from an LLM (Groq's llama-3.1-70b-versatile):
+
+```bash
+python collect_data.py --n-games 1000 --n-workers 4
+```
+
+**What happens:**
+- The script spawns 4 parallel worker threads.
+- Each worker initializes a `MonopolyEnv` and lets the LLM play full games.
+- **At each decision point:** The current board state (214-dim observation) is sent to the LLM as a structured prompt. The LLM reasons about the best move and returns an action ID.
+- **All (state, action) pairs are recorded** as compressed NumPy archives (.npz) in `data_collected/`.
+
+**Options:**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| --n-games | 1000 | Number of full games to simulate |
+| --n-workers | 4 | Parallel threads (LLM is the bottleneck) |
+| --save-dir | data_collected | Output directory |
+| --checkpoint-every | 50 | Save a checkpoint every N games |
+
+**Output:** Each checkpoint saves ~1,000 (state, action) pairs in compressed NumPy format. For 1,000 games with 4-player matches, expect ~50,000–100,000 total decision steps.
+
+#### 1.2 Behavioral Cloning Training
+
+Once data is collected, train a neural network to mimic the LLM's decisions:
+
+```bash
+python train_bc.py --epochs 50 --batch-size 256 --lr 3e-4
+```
+
+**Training loop (`training/bc_trainer.py`):**
+
+1. **Load all collected data** from .npz files into a PyTorch Dataset.
+2. **Split into train/val** (default 90/10 split).
+3. **For each epoch:**
+   - Forward pass through the network: `obs → trunk → policy_head → logits` (53 action logits)
+   - Compute cross-entropy loss: `loss = -log(softmax(logits)[true_action])`
+   - Backprop, gradient clipping (norm 1.0), Adam optimizer step.
+   - Evaluate on validation set; track both **loss** and **accuracy**.
+4. **Early stopping:** If validation loss doesn't improve for 5 epochs, training stops.
+5. **Save best model** as `models/bc/best_model.pt` (checkpoint with lowest validation loss).
+
+**Key hyperparameters** (configurable in `config.yaml`):
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| epochs | 50 | Maximum training epochs |
+| batch_size | 256 | Mini-batch size |
+| lr | 3e-4 | Adam learning rate |
+| val_split | 0.1 | Fraction of data for validation |
+| early_stop_patience | 5 | Epochs of no improvement before stopping |
+| hidden | 512 | Hidden layer width |
+
+**Expected performance:**
+- Training typically converges in 10–25 epochs.
+- Final validation accuracy: ~70–85% (the LLM's decisions are complex; perfect imitation is impossible).
+- Loss decreases smoothly with a cosine annealing learning rate schedule.
+
+**W&B Integration (optional):**
+```bash
+python train_bc.py --wandb
+```
+This logs training curves, accuracy, and hyperparameters to Weights & Biases.
+
+---
+
+### Neural Network Architecture
+
+The policy network is a deep MLP shared between BC and PPO training:
+
+```
+Input: 214-dim observation
+    │
+    ├─ Linear(214 → 512) + LayerNorm + ReLU
+    │
+    ├─ Linear(512 → 512) + LayerNorm + ReLU
+    │
+    ├─ Linear(512 → 256) + LayerNorm + ReLU
+    │
+    ├─ Policy Head: Linear(256 → 53)  ← action logits (one per action)
+    │
+    └─ Value Head: Linear(256 → 1)    ← state value (for PPO advantage calculation)
+```
+
+**Key design choices:**
+- **Layer Normalization:** Stabilizes training and reduces internal covariate shift.
+- **Orthogonal Initialization:** Standard for RL—helps with gradient flow and stability.
+- **Dual Heads:** The shared trunk extracts features; policy head produces action logits, value head estimates discounted future reward.
+- **Gradient Clipping:** Applied during BC training to prevent exploding gradients.
+
+---
+
+### Stage 2: PPO Self-Play Training
+
+After BC training completes, refine the policy using Proximal Policy Optimization (PPO):
+
+```bash
+python train_ppo.py --total-timesteps 5000000 --n-envs 8
+```
+
+**Overview:**
+- **Initializes** the PPO policy with BC weights (transfer learning).
+- **Runs 8 parallel game environments** simultaneously.
+- **Agents play self-play** for 5 million timesteps (~500K games with 4 players each).
+- **Rewards shaped** to encourage aggressive, strategic play.
+
+#### 2.1 PPO Algorithm Overview
+
+PPO is a policy gradient method that:
+1. Collects experience by running the current policy in the environment.
+2. Estimates advantages (how much better an action was vs. expected) using Generalized Advantage Estimation (GAE).
+3. Updates the policy using a clipped objective to prevent too-large updates.
+4. Also trains a value network to estimate state values (used for advantage calculation).
+
+**In pseudocode:**
+```
+For each training iteration:
+  - Collect n_steps=2048 transitions from each of 8 environments (16K transitions total)
+  - Compute advantages using GAE (λ=0.95)
+  - For n_epochs=10:
+      - Split transitions into mini-batches of 64
+      - Compute policy loss (with clipping) + value loss + entropy bonus
+      - Backprop and update policy & value networks
+```
+
+#### 2.2 Key Hyperparameters (Stable-Baselines3 PPO)
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| total_timesteps | 5,000,000 | Total environment interactions |
+| n_envs | 8 | Parallel game instances |
+| n_steps | 2048 | Rollout length per environment |
+| batch_size | 64 | Mini-batch size for gradient updates |
+| n_epochs | 10 | Passes over collected experience |
+| learning_rate | 3e-4 | Policy optimizer (Adam) learning rate |
+| gamma | 0.99 | Discount factor (future rewards) |
+| gae_lambda | 0.95 | GAE smoothing parameter |
+| clip_range | 0.2 | PPO clipping range (ε in the paper) |
+| ent_coef | 0.05 | Entropy bonus coefficient (encourages exploration) |
+
+All these are configurable in `config.yaml` under the `ppo` section.
+
+#### 2.3 Reward Shaping for Aggressive Play
+
+To prevent "cowardly" strategies, the reward function is:
+
+```
+r_t = 
+  - 0.005 * (every timestep penalty to discourage long games)
+  + 1.0 * (if opponent goes bankrupt)
+  + 0.5 * (if opponent pays me rent)
+  + 0.1 * (if I buy a property)
+  + 0.05 * (per complete color set I own)
+```
+
+This encourages:
+- **Fast, aggressive play** (penalty for stalling)
+- **Bankrupting opponents** (large +1.0 reward)
+- **Collecting rent** (dense feedback when opponents land on my properties)
+- **Strategic property development** (bonuses for complete sets)
+
+#### 2.4 Weight Transfer from BC to PPO
+
+When starting PPO training:
+1. Load the trained BC network (`models/bc/best_model.pt`).
+2. Extract its state dict (all layer weights and biases).
+3. Load into Stable-Baselines3's MlpPolicy (which has a similar but not identical architecture).
+4. **Partial weight transfer:** Only copy weights for layers with matching shapes/names.
+5. Remaining untrained layers use orthogonal initialization.
+
+This **warm-start** dramatically reduces training time (PPO doesn't need to learn basic game logic from scratch).
+
+#### 2.5 Callbacks & Evaluation
+
+During training, two callbacks monitor progress:
+
+1. **CheckpointCallback:** Saves model snapshots every 100K timesteps to `models/ppo/ppo_checkpoint_*.zip`.
+2. **EvalCallback:** Every 50K timesteps, runs 20 evaluation episodes (deterministic rollouts) and saves the best model as `models/ppo/best_model.zip`.
+
+**Training output:**
+```
+| Timestep   | Reward | Policy Loss | Value Loss | Entropy | Time  |
+|------------|--------|-------------|------------|---------|-------|
+| 0          | -0.05  | 1.234       | 0.678      | 3.50    | 0.5s  |
+| 100000     | 0.12   | 0.567       | 0.234      | 2.80    | 45s   |
+| 1000000    | 0.45   | 0.123       | 0.056      | 1.20    | 450s  |
+| 5000000    | 0.78   | 0.045       | 0.012      | 0.85    | 2250s |
+```
+
+Expected training time: **4–8 hours** on a modern GPU (NVIDIA A100/RTX 3090).
+
+#### 2.6 TensorBoard & W&B Logging
+
+Optional experiment tracking:
+
+```bash
+# Enable W&B logging (requires WANDB_API_KEY in .env)
+python train_ppo.py --wandb
+
+# Or view TensorBoard logs
+tensorboard --logdir models/ppo/tb_logs/
+```
+
+Logged metrics:
+- Episode reward (cumulative return per game)
+- Policy loss & value loss
+- Entropy (exploration indicator)
+- Explained variance (how well the value network predicts returns)
 
 ---
 
