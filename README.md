@@ -1,79 +1,237 @@
-# Monopoly RL: Full-Stack Board Game with AI Bots
+# 🎲 Monopoly — Full-Stack Board Game with AI Bots
 
-This project is a complete, full-stack implementation of the classic board game Monopoly. It features a modern, responsive web frontend built with React, and a powerful Reinforcement Learning (RL) backend built with Python, PyTorch, and Stable-Baselines3. 
+A complete, browser-based Monopoly game with intelligent AI opponents. Built with a React/TypeScript frontend and a Python RL backend, featuring a **3-tier hybrid AI system** that combines deterministic heuristics, Expected Value math, and reinforcement learning to play like a real human.
 
-The highlight of the project is the AI bots: agents trained using a combination of **Behavioral Cloning (BC)** and **Proximal Policy Optimization (PPO)** to play a deeply strategic game against humans or other bots.
+![Monopoly](https://img.shields.io/badge/Game-Monopoly-red?style=for-the-badge)
+![React](https://img.shields.io/badge/Frontend-React%20%2B%20TypeScript-blue?style=for-the-badge)
+![Python](https://img.shields.io/badge/Backend-Python%20%2B%20PyTorch-green?style=for-the-badge)
+
+---
+
+## ✨ Features
+
+- **Full Monopoly Rules** — Property buying, rent collection, houses/hotels, auctions, mortgages, jail, Chance & Community Chest cards, bankruptcy, and win detection.
+- **Up to 6 Players** — Any mix of humans and AI bots.
+- **Animated UI** — 3D dice rolls, smooth token movement, card reveals, and turn-by-turn announcements.
+- **Smart AI Bots** — A hybrid system that buys properties like a human, bids intelligently in auctions using Expected Value, and builds houses strategically via reinforcement learning.
+- **Lobby System** — Toggle any player between 👤 Human and 🤖 Bot before starting.
 
 ---
 
 ## 🏗️ Architecture
 
-The project is split into two distinct halves that communicate via a REST API:
+The project is split into two halves that communicate via a REST API:
 
-### 1. The Frontend (React / TypeScript / Zustand)
-- Located in the root directory.
-- Built using Vite, React, and TailwindCSS.
-- Game state is managed by a massive, robust Zustand store (`gameStore.ts`).
-- Handles all UI animations, dice rolls, card reveals, player balances, and human interaction.
+```
+┌──────────────────────────────────────────────────────────────┐
+│  FRONTEND  (React / TypeScript / Zustand)                    │
+│                                                              │
+│  Board UI ◄──► GameStore (Zustand) ──► useBotTurn hook       │
+│                                              │               │
+│                                    POST /act_frontend        │
+└──────────────────────────────────────┬───────────────────────┘
+                                       │
+                                       ▼
+┌──────────────────────────────────────────────────────────────┐
+│  BACKEND  (Python / FastAPI / PyTorch)                        │
+│                                                              │
+│  Frontend JSON ──► frontend_adapter.py ──► MonopolyEngine    │
+│                                                  │           │
+│                              ┌────────────────────┤           │
+│                              ▼                    ▼           │
+│                     Heuristic Layer         RL Model (PPO)    │
+│                   (BUY + AUCTION)        (ROLL / BUILD /     │
+│                                           END_TURN / JAIL)   │
+└──────────────────────────────────────────────────────────────┘
+```
 
-### 2. The RL Backend (`/monopoly-rl`)
-- Built in Python using FastAPI, PyTorch, and Stable-Baselines3.
-- Contains a standalone, headless python `MonopolyEngine` that perfectly simulates the board game rules without a UI.
-- The FastAPI server (`server/main.py`) exposes a `/act_frontend` endpoint.
-- **The Bridge:** When it is a bot's turn, the React frontend sends the entire Zustand JSON state to the backend. The backend reconstructs the `MonopolyEngine` locally, calculates exactly which actions are legal, runs the observation through the PPO neural network, and returns a translated command (e.g., `"BUY_PROPERTY"`) to the frontend.
+### The 3-Tier Decision System
+
+| Phase | Handler | How It Works |
+|-------|---------|-------------|
+| **BUY** | Deterministic Heuristic | If the bot can afford the property and keep a safe cash reserve ($100 early / $200 mid / $300 late game), it **always buys**. If buying completes a monopoly, it buys regardless of reserve. |
+| **AUCTION** | EV-Capped Heuristic | Each property has a calculated **Expected Value (EV)** based on list price, color group synergy, monopoly potential, blocking value, and game phase. Bots bid up to the EV but never drain cash below safety. Monopoly completion = all-in. |
+| **ROLL / BUILD / END_TURN / JAIL** | PPO Neural Network | A reinforcement learning model trained via Behavioral Cloning + PPO self-play handles movement decisions and house building strategy. |
 
 ---
 
-## 🧠 How the AI was Trained
+## 🧠 How the AI Works
 
-Training an RL agent to play Monopoly is notoriously difficult due to the massive observation space, delayed rewards, and strictly zero-sum multi-agent mechanics. We used a two-stage approach:
+### Property Valuation (Expected Value)
 
-### Stage 1: Behavioral Cloning (BC) from an LLM
-- We initially used a Large Language Model to play thousands of games against itself.
-- We recorded the board states and the actions the LLM chose.
-- We trained a baseline neural network (`models/bc/best_model.pt`) using supervised learning to simply mimic the LLM's understanding of the game.
-- This gave the agent a foundational understanding of basic logic (e.g., buying properties is usually good, passing is usually bad) without having to stumble blindly through random exploration.
+Every property has a dynamically calculated EV that the bot uses to decide whether to buy or how much to bid:
 
-### Stage 2: PPO Self-Play
-- We initialized a PPO (Proximal Policy Optimization) model with the weights from the BC model.
-- We placed the agent in a custom Gymnasium environment (`MonopolyEnv`) where it played millions of steps of self-play.
-- **Reward Shaping:** To prevent the agent from playing a "cowardly" or "pacifist" strategy (just walking around the board refusing to buy properties to avoid bankruptcy), we implemented a multi-agent **Relative Net-Worth** buffer. 
-  - The agent is penalized `-0.005` points for every step it takes (to discourage stalling).
-  - The agent receives dense positive rewards whenever an opponent pays it rent or goes bankrupt. 
-- This forced the agent to become an aggressive capitalist, buying properties and building houses to bankrupt its opponents!
+| Scenario | Valuation |
+|----------|-----------|
+| First property in a color group | 1.0× list price |
+| Already own 1+ in the group | 1.3× list price |
+| **Completes a monopoly** | **2.0× price + 30% of hotel rent** |
+| Railroad (own 2+) | 1.5× list price |
+| Utility | 0.8× list price |
+| **Blocks opponent's monopoly** | max(EV, 1.8× price) |
+
+All valuations are scaled by a **game-phase factor** — properties are worth more early game (more turns to collect rent) and less late game.
+
+### Auction Bidding Logic
+
+When a property goes to auction (either because a player declined to buy, or during a bankruptcy sale):
+
+1. Calculate the EV of the property for this bidder.
+2. Determine the **absolute max bid** = balance − safety reserve.
+3. If completing a monopoly: no safety reserve (go all-in).
+4. If blocking an opponent's monopoly: boost max bid to 1.8× list price.
+5. Pick the highest bid tier (MIN / LOW / MED / HIGH / ALL) that stays within the target.
+6. If the current bid already exceeds the EV: **pass**.
+
+### RL Training Pipeline
+
+The PPO model was trained in two stages:
+
+1. **Stage 1 — Behavioral Cloning:** A Groq LLM (llama-3.1-70b) played thousands of games. Its decisions were recorded as (state, action) pairs and used to train a baseline neural network via supervised learning.
+
+2. **Stage 2 — PPO Self-Play:** The BC model was fine-tuned with Proximal Policy Optimization across 8 parallel environments. Reward shaping encourages property acquisition (+0.3), monopoly completion (+2.0), house building (+0.5), and heavily penalizes bankruptcy (−5.0).
 
 ---
 
-## 🚀 How to Run the Game Locally
+## 🚀 Getting Started
 
-To play the game against the RL bots, you must run both the Python backend and the React frontend simultaneously.
+### Prerequisites
 
-### 1. Start the RL Backend Server
-The backend requires Python and PyTorch. It hosts the FastAPI model server.
+- **Node.js** 18+ and npm
+- **Python** 3.10+ with pip
+- A **Groq API key** (free at [console.groq.com](https://console.groq.com)) — only needed for data collection, not for playing
+
+### 1. Install Frontend Dependencies
+
 ```bash
-# Navigate to the backend directory
+cd monopoly
+npm install
+```
+
+### 2. Install Backend Dependencies
+
+```bash
 cd monopoly-rl
-
-# Install dependencies (if you haven't already)
 pip install -r requirements.txt
+```
 
-# Start the FastAPI server on port 8765
+### 3. Configure Environment
+
+```bash
+cd monopoly-rl
+cp .env.example .env
+# Edit .env and add your GROQ_API_KEY (only needed for training)
+```
+
+### 4. Start the Backend Server
+
+```bash
+cd monopoly-rl
 python server/main.py
 ```
-*Note: Ensure your trained models are located in `monopoly-rl/models/ppo/best_model.zip` or `monopoly-rl/models/bc/best_model.pt`.*
 
-### 2. Start the Frontend App
-Open a *new* terminal window in the root directory of the project.
+The FastAPI server starts on `http://0.0.0.0:8765`. It auto-loads the best available model: PPO → BC → random fallback.
+
+### 5. Start the Frontend
+
+Open a **new terminal**:
+
 ```bash
-# Install dependencies
-npm install
-
-# Start the Vite development server
+cd monopoly
 npm run dev
 ```
 
-### 3. Play!
-- Open your browser to `http://localhost:5173`.
-- Click **Local Multiplayer**.
-- In the lobby, use the **👤 HUMAN / 🤖 BOT** toggle to set up your game. You can play 1v1 against a bot, 1v3, or even have 6 bots play against each other while you watch!
+### 6. Play!
+
+- Open `http://localhost:5173`
+- Click **Local Multiplayer**
+- Toggle players between 👤 **Human** and 🤖 **Bot**
 - Click **Start Game** and enjoy!
+
+---
+
+## 🔄 Retraining the AI
+
+If you want to retrain the bots from scratch:
+
+```bash
+cd monopoly-rl
+
+# 1. Collect behavioral cloning data (requires GROQ_API_KEY)
+python collect_data.py --n-games 200
+
+# 2. Train the BC baseline
+python train_bc.py
+
+# 3. Train PPO (1M steps on a GPU takes ~30-60 min)
+python train_ppo.py --total-timesteps 1000000 --device cuda
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--total-timesteps` | 5,000,000 | Total PPO training steps |
+| `--device` | cpu | `cuda` for GPU training |
+| `--n-envs` | 8 | Parallel training environments |
+
+---
+
+## 📁 Project Structure
+
+```
+monopoly/
+├── src/
+│   ├── components/
+│   │   ├── Board/          # Game board, squares, tokens, title deeds
+│   │   ├── Dice/           # 3D animated dice
+│   │   ├── GamePanel/      # Player info, action buttons, auction UI
+│   │   ├── Menu/           # Main menu, lobby, player setup
+│   │   ├── Trade/          # Trade offer/response UI
+│   │   └── ui/             # Shared UI primitives
+│   ├── hooks/
+│   │   └── useBotTurn.ts   # React hook that triggers bot actions
+│   ├── lib/
+│   │   └── botClient.ts    # HTTP client for bot ↔ backend communication
+│   ├── store/
+│   │   └── gameStore.ts    # Zustand store — all game state & actions
+│   └── types/
+│       └── game.ts         # TypeScript type definitions
+│
+├── monopoly-rl/
+│   ├── agents/
+│   │   └── llm_agent.py    # Groq LLM agent (used for data collection)
+│   ├── env/
+│   │   ├── board.py        # All 40 squares with complete rent tables
+│   │   ├── game_engine.py  # Full headless Monopoly engine
+│   │   ├── monopoly_env.py # Gymnasium wrapper
+│   │   └── state_encoder.py # State → 214-dim observation vector
+│   ├── server/
+│   │   ├── main.py         # FastAPI server + 3-tier decision system
+│   │   └── frontend_adapter.py # Zustand JSON → MonopolyEngine bridge
+│   ├── training/
+│   │   ├── policy_network.py   # Neural network architecture
+│   │   └── bc_trainer.py       # Behavioral cloning trainer
+│   ├── models/             # Saved model checkpoints
+│   ├── data_collected/     # BC training data (.npz)
+│   ├── collect_data.py     # CLI: LLM data collection
+│   ├── train_bc.py         # CLI: behavioral cloning
+│   ├── train_ppo.py        # CLI: PPO self-play
+│   └── config.yaml         # All hyperparameters
+```
+
+---
+
+## 🛠️ Tech Stack
+
+| Layer | Technology |
+|-------|------------|
+| Frontend | React, TypeScript, Zustand, Vite |
+| Backend | Python, FastAPI, PyTorch |
+| RL Framework | Stable-Baselines3, sb3-contrib (MaskablePPO) |
+| LLM (training only) | Groq API (llama-3.1-70b-versatile) |
+| Communication | REST API (JSON over HTTP) |
+
+---
+
+## 📜 License
+
+MIT

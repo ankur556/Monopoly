@@ -1,61 +1,127 @@
-﻿# Monopoly RL
+# Monopoly RL — Hybrid AI Backend
 
-A two-stage reinforcement learning agent that learns to play Monopoly:
-
-1. **Stage 1 — Behavioral Cloning (BC):** An LLM (Groq / llama-3.1-70b-versatile) plays thousands of games; its decisions are recorded as (state, action) pairs, then a neural network is trained via supervised learning to imitate them.
-2. **Stage 2 — PPO Self-Play:** The BC-initialised policy is fine-tuned with Proximal Policy Optimisation (Stable-Baselines3) against copies of itself and occasional LLM opponents, enabling it to surpass its teacher.
+The reinforcement learning and heuristic AI backend for the Monopoly board game. This module contains a complete headless Monopoly engine, a 3-tier bot decision system, and the full training pipeline.
 
 ---
 
-## Architecture Overview
+## How the Bot Decides
 
-`
-┌─────────────────────────────────────────────────────────────┐
-│  Stage 1: Data Collection & Behavioral Cloning              │
-│                                                             │
-│  Groq LLM ──▶ MonopolyEnv ──▶ (state, action) pairs        │
-│                                      │                      │
-│                                      ▼                      │
-│                               PolicyNetwork (BC)            │
-│                              (supervised training)          │
-└─────────────────────────────────────────────────────────────┘
-                        │
-                        ▼  initialise weights
-┌─────────────────────────────────────────────────────────────┐
-│  Stage 2: PPO Self-Play                                     │
-│                                                             │
-│  PolicyNetwork ──▶ SB3 PPO ──▶ self-play + LLM opponents   │
-│                         │                                   │
-│                         ▼                                   │
-│                   best_model.zip                            │
-└─────────────────────────────────────────────────────────────┘
-                        │
-                        ▼
-┌─────────────────────────────────────────────────────────────┐
-│  FastAPI Model Server  (port 8765)                          │
-│  POST /act  { state, legal_actions } ──▶ { action }         │
-└─────────────────────────────────────────────────────────────┘
-`
+The bot uses a **3-tier hybrid architecture** — not a single neural network. Each game phase is routed to the most appropriate decision method:
+
+```
+              ┌─────────────────────────────────┐
+              │     Frontend sends game state    │
+              └──────────────┬──────────────────┘
+                             ▼
+              ┌─────────────────────────────────┐
+              │   frontend_adapter.py            │
+              │   Reconstruct MonopolyEngine     │
+              │   Calculate legal actions        │
+              └──────────────┬──────────────────┘
+                             ▼
+              ┌──────────────────────────────────┐
+              │         Phase Router             │
+              │                                  │
+              │  BUY? ──────► Heuristic          │
+              │  AUCTION? ──► EV-Capped Bidding  │
+              │  OTHER? ────► PPO / BC Model     │
+              └──────────────────────────────────┘
+```
+
+### Tier 1: BUY Phase — Deterministic Heuristic
+
+No ML involved. The bot acts like a rational human player:
+
+- **Early game (turn < 30):** Buy if balance − price ≥ $100
+- **Mid game (turn 30–60):** Buy if balance − price ≥ $200
+- **Late game (turn > 60):** Buy if balance − price ≥ $300
+- **Monopoly completion:** Always buy, regardless of reserve
+
+### Tier 2: AUCTION Phase — Expected Value Bidding
+
+Each property has a dynamically calculated **Expected Value (EV)**:
+
+```
+EV = base_price × synergy_multiplier × game_phase_factor
+
+Where:
+  synergy_multiplier =
+    2.0× + 30% hotel rent  (completes monopoly)
+    1.3×                    (partial color group)
+    1.5×                    (railroad, own 2+)
+    0.8×                    (utility)
+    1.0×                    (default)
+    
+  game_phase_factor = clamp((120 − turn) / 80, 0.5, 1.5)
+```
+
+The bot bids up to `min(EV, balance − safety_reserve)`. Special cases:
+- **Monopoly completion:** No safety reserve (all-in)
+- **Blocking opponent's monopoly:** EV boosted to max(EV, 1.8× price)
+
+### Tier 3: ROLL / BUILD / END_TURN / JAIL — RL Model
+
+A PPO neural network (trained via BC + self-play) handles the remaining decisions. The random fallback prefers BUILD actions when available.
 
 ---
 
-## Observation Space (214-dimensional float32)
+## Training Pipeline
+
+### Stage 1: Behavioral Cloning from LLM
+
+An LLM (Groq llama-3.1-70b) plays thousands of simulated games. Its decisions are recorded and used to train a baseline policy network.
+
+```bash
+# Collect data (requires GROQ_API_KEY in .env)
+python collect_data.py --n-games 200
+
+# Train BC model
+python train_bc.py
+```
+
+### Stage 2: PPO Self-Play
+
+The BC policy is loaded into a MaskablePPO agent and fine-tuned via self-play.
+
+```bash
+# Train for 1M steps on GPU (~30-60 min on RTX 3090)
+python train_ppo.py --total-timesteps 1000000 --device cuda
+```
+
+#### Reward Shaping
+
+| Event | Reward |
+|-------|--------|
+| Each step (time penalty) | −0.005 |
+| Buy a property | +0.3 |
+| Complete a monopoly | +2.0 |
+| Build a house | +0.5 |
+| Win an auction | +0.1 |
+| Receive rent (per $100) | +1.0 |
+| Pay rent (per $100) | −1.0 |
+| Go bankrupt | −5.0 |
+| Win the game | +10.0 |
+| Bankrupt an opponent | +5.0 |
+
+---
+
+## Observation Space (214-dim float32)
 
 | Slice | Dims | Description |
 |-------|------|-------------|
-| [0:40] | 40 | Property ownership: −1 opponent, 0 unowned, 1 self |
-| [40:80] | 40 | House/hotel count per property (0–5) |
-| [80:120] | 40 | Mortgage status per property (0/1) |
-| [120:124] | 4 | Each player's normalised cash balance (÷1500) |
-| [124:128] | 4 | Each player's board position (÷40) |
-| [128:132] | 4 | Each player's jail status (0/1) |
-| [132:136] | 4 | Each player's jail-free-card count |
-| [136:176] | 40 | Per-property rent owed if landed on (normalised) |
-| [176:180] | 4 | Number of complete colour sets owned per player |
-| [180:184] | 4 | Each player's bankruptcy status (0/1) |
-| [184:188] | 4 | Number of properties owned per player |
-| [188:192] | 4 | Rounds remaining (normalised, same for all players) |
-| [192:214] | 22 | Current turn context (phase, dice values, pending trade, etc.) |
+| 0–39 | 40 | Property ownership (owner_idx+1)/n_players, 0=unowned |
+| 40–79 | 40 | House count / 5 |
+| 80–119 | 40 | Mortgage status (0/1) |
+| 120–125 | 6 | Player balances / 5000 |
+| 126–131 | 6 | Player positions / 40 |
+| 132–137 | 6 | In-jail flags |
+| 138–143 | 6 | Jail turns / 3 |
+| 144–149 | 6 | Bankrupt flags |
+| 150–155 | 6 | GOOJF card count / 2 |
+| 156 | 1 | Current player index / 6 |
+| 157–158 | 2 | Last dice roll / 6 |
+| 159–160 | 2 | Pending property position / 40 |
+| 161–213 | 53 | Legal action mask |
 
 ---
 
@@ -63,154 +129,112 @@ A two-stage reinforcement learning agent that learns to play Monopoly:
 
 | ID | Action |
 |----|--------|
-| 0 | Roll dice / end turn |
-| 1 | Buy current property |
-| 2–41 | Build house on property 0–39 |
-| 42 | Sell house (cheapest) |
-| 43–52 | Mortgage property 0–9 (grouped by colour) |
-| 53 | Unmortgage property (cheapest) |
+| 0 | Roll dice |
+| 1 | End turn |
+| 2 | Buy property |
+| 3 | Decline / start auction |
+| 4 | Pay $50 jail fine |
+| 5 | Use Get-Out-Of-Jail-Free card |
+| 6 | Roll for doubles (jail) |
+| 7 | Auction: pass |
+| 8 | Auction: bid minimum ($1 above current) |
+| 9 | Auction: bid 15% of balance |
+| 10 | Auction: bid 30% of balance |
+| 11 | Auction: bid 60% of balance |
+| 12 | Auction: bid entire balance |
+| 13–52 | Build house on property at position 0–39 |
 
-> Actions outside the legal mask are automatically blocked by the environment.
-
----
-
-## Setup
-
-### 1. Install dependencies
-
-`ash
-pip install -r requirements.txt
-`
-
-### 2. Configure environment
-
-`ash
-cp .env.example .env
-# Edit .env and add your GROQ_API_KEY
-`
-
-Recommended LLM: **llama-3.1-70b-versatile** via Groq — fast inference with strong strategic reasoning at low cost.
+> Actions outside the legal mask are blocked by the environment.
 
 ---
 
-## Stage 1: Data Collection
+## Running the Server
 
-`ash
-python collect_data.py --n-games 1000
-`
+```bash
+python server/main.py
+```
 
-Options:
+Starts on `http://0.0.0.0:8765`. Auto-loads: PPO → BC → random fallback.
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| --n-games | 1000 | Number of full games to simulate |
-| --n-workers | 4 | Parallel threads (LLM is the bottleneck) |
-| --save-dir | data_collected | Output directory |
-| --checkpoint-every | 50 | Save a checkpoint every N games |
+### Endpoints
 
-Collected data is written to data_collected/ as compressed NumPy archives (.npz).
+**POST /act_frontend** — Primary endpoint used by the game frontend.
 
----
-
-## Stage 1: Behavioral Cloning
-
-`ash
-python train_bc.py
-`
-
-Trains a PolicyNetwork on the collected (state, action) pairs. Checkpoints saved to models/bc/. The best validation-loss model is saved as models/bc/best_model.pt.
-
-Key hyperparameters (configurable in config.yaml under ehavioral_cloning):
-
-| Key | Default | Description |
-|-----|---------|-------------|
-| epochs | 50 | Training epochs |
-| atch_size | 256 | Mini-batch size |
-| lr | 3e-4 | Adam learning rate |
-| early_stop_patience | 5 | Stop if val-loss doesn't improve |
-
----
-
-## Stage 2: PPO Self-Play
-
-`ash
-python train_ppo.py
-`
-
-Loads BC weights into SB3's MlpPolicy, then trains with PPO for 5 M timesteps across 8 parallel environments. Checkpoints saved to models/ppo/.
-
-Key hyperparameters (configurable in config.yaml under ppo):
-
-| Key | Default |
-|-----|---------|
-| 	otal_timesteps | 5 000 000 |
-| 
-_envs | 8 |
-| llm_opponent_prob | 0.3 |
-| eval_every | 50 000 |
-
----
-
-## Running the Model Server
-
-`ash
-python -m server.main
-`
-
-The FastAPI server listens on http://0.0.0.0:8765.
-
-**Endpoint:** POST /act
-
-Request body:
-`json
-{
-   state: [0.0, ...],        // 214-dim observation
-  legal_actions: [0, 1, 3]  // list of valid action IDs
-}
-`
-
+Request: Full Zustand game state JSON.  
 Response:
-`json
-{ action: 1 }
-`
+```json
+{ "actionType": "BUY_PROPERTY", "payload": null }
+```
 
-The server auto-selects the best available model: PPO (models/ppo/best_model.zip) → BC fallback (models/bc/best_model.pt).
+**POST /act** — Raw observation endpoint for testing.
+
+Request:
+```json
+{ "state": [0.0, ...], "legal_actions": [0, 1, 3] }
+```
+Response:
+```json
+{ "action": 1, "model_type": "ppo" }
+```
 
 ---
 
 ## Project Structure
 
-`
+```
 monopoly-rl/
 ├── agents/
-│   ├── __init__.py
-│   ├── llm_agent.py        # Groq-backed LLM agent
-│   └── random_agent.py     # Uniform-random baseline
-├── data/
-│   ├── __init__.py
-│   └── collector.py        # Game data collection logic
-├── training/
-│   ├── __init__.py
-│   ├── policy_network.py   # Neural network architecture
-│   └── bc_trainer.py       # Behavioral cloning training loop
+│   ├── llm_agent.py         # Groq LLM agent (data collection + EV context)
+│   └── random_agent.py      # Uniform-random baseline
+├── env/
+│   ├── board.py             # 40 squares, rent tables, color groups
+│   ├── game_engine.py       # Complete headless Monopoly engine
+│   ├── monopoly_env.py      # Gymnasium wrapper
+│   └── state_encoder.py     # State → 214-dim observation
 ├── server/
-│   ├── __init__.py
-│   └── main.py             # FastAPI model server
-├── models/                 # Saved model checkpoints
-├── data_collected/         # Collected game data (Stage 1)
-├── collect_data.py         # CLI: run LLM data collection
-├── train_bc.py             # CLI: behavioral cloning training
-├── train_ppo.py            # CLI: PPO self-play training
-├── config.yaml             # All hyperparameters
-├── .env.example            # Environment variable template
-└── requirements.txt        # Python dependencies
-`
+│   ├── main.py              # FastAPI server + 3-tier decision router
+│   └── frontend_adapter.py  # Zustand JSON → MonopolyEngine bridge
+├── training/
+│   ├── policy_network.py    # Neural network (shared trunk + heads)
+│   └── bc_trainer.py        # Behavioral cloning trainer
+├── data/
+│   └── collector.py         # Multi-threaded game data collection
+├── models/
+│   ├── ppo/best_model.zip   # Trained PPO model
+│   └── bc/best_model.pt     # Trained BC model
+├── data_collected/           # BC training data (.npz)
+├── collect_data.py           # CLI: data collection
+├── train_bc.py               # CLI: behavioral cloning
+├── train_ppo.py              # CLI: PPO training
+├── config.yaml               # Hyperparameters
+├── requirements.txt          # Python dependencies
+└── .env.example              # Environment template
+```
 
 ---
 
-## Experiment Tracking
+## Configuration
 
-Set WANDB_API_KEY in .env to enable Weights & Biases logging. Runs are tagged to the monopoly-rl project by default.
+All hyperparameters are in `config.yaml`:
+
+```yaml
+behavioral_cloning:
+  epochs: 50
+  batch_size: 256
+  lr: 3e-4
+  early_stop_patience: 5
+
+ppo:
+  total_timesteps: 5000000
+  n_envs: 8
+  n_steps: 2048
+  batch_size: 64
+  learning_rate: 3e-4
+  gamma: 0.99
+  ent_coef: 0.05
+  checkpoint_every: 100000
+  eval_every: 50000
+```
 
 ---
 
